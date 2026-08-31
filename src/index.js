@@ -13,7 +13,7 @@ function withTimeout(promise, ms) {
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.sessions = []; // {writer, token, role}
+    this.sessions = [];
     this.hostToken = null;
     this.hostGraceStartedAt = null;
   }
@@ -26,8 +26,14 @@ export class Room extends DurableObject {
 
   async ensureHeartbeat() {
     const existing = await this.ctx.storage.getAlarm();
-    if (existing === null) {
-      await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+    if (existing === null) await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+  }
+
+  async startHostGraceIfNeeded() {
+    if (this.hostToken && this.hostGraceStartedAt === null) {
+      this.hostGraceStartedAt = Date.now();
+      await this.broadcast({ type: "status", text: `host disconnected, ${GRACE_MS / 1000}s grace period started` });
+      await this.ctx.storage.setAlarm(Date.now() + GRACE_MS);
     }
   }
 
@@ -38,26 +44,19 @@ export class Room extends DurableObject {
     if (action === "connect") {
       const wantRole = url.searchParams.get("role") === "host" ? "host" : "client";
       const reconnectToken = url.searchParams.get("token");
-
-      let token, role;
-      let isReconnect = false;
+      let token, role, isReconnect = false;
 
       if (wantRole === "host") {
         if (this.hostToken && reconnectToken === this.hostToken) {
-          token = this.hostToken;
-          role = "host";
-          isReconnect = true;
+          token = this.hostToken; role = "host"; isReconnect = true;
           this.hostGraceStartedAt = null;
         } else if (this.hostToken) {
           return new Response("host already connected", { status: 409 });
         } else {
-          token = crypto.randomUUID();
-          role = "host";
-          this.hostToken = token;
+          token = crypto.randomUUID(); role = "host"; this.hostToken = token;
         }
       } else {
-        token = crypto.randomUUID();
-        role = "client";
+        token = crypto.randomUUID(); role = "client";
       }
 
       const { readable, writable } = new TransformStream();
@@ -77,17 +76,26 @@ export class Room extends DurableObject {
 
     if (action === "command") {
       const token = request.headers.get("X-Token");
-      if (!token || token !== this.hostToken) {
-        return new Response("forbidden: host only", { status: 403 });
-      }
+      if (!token || token !== this.hostToken) return new Response("forbidden: host only", { status: 403 });
       const text = await request.text();
       await this.broadcast({ type: "msg", text });
       return new Response(`sent to ${this.sessions.length} clients`);
     }
 
+    if (action === "leave") {
+      const token = url.searchParams.get("token");
+      const before = this.sessions.length;
+      this.sessions = this.sessions.filter((s) => s.token !== token);
+
+      if (token === this.hostToken && this.sessions.length !== before) {
+        await this.startHostGraceIfNeeded();
+      }
+      return new Response("ok");
+    }
+
     if (action === "test") {
       const html = `<!DOCTYPE html><html><body>
-<h3>Heartbeat + grace period test</h3>
+<h3>Active leave (sendBeacon) test</h3>
 <div id="status">connecting...</div>
 <div id="controls"></div>
 <div id="log"></div>
@@ -97,7 +105,9 @@ const status = document.getElementById('status');
 const controls = document.getElementById('controls');
 let token = null;
 const params = new URLSearchParams(window.location.search);
-const es = new EventSource(window.location.pathname.replace(/\\/test$/, '/connect') + '?' + params.toString());
+const basePath = window.location.pathname.replace(/\\/test$/, '');
+const es = new EventSource(basePath + '/connect?' + params.toString());
+
 es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.type === 'init') {
@@ -106,9 +116,7 @@ es.onmessage = (e) => {
     if (data.role === 'host') {
       controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
       document.getElementById('send').onclick = () => {
-        fetch(window.location.pathname.replace(/\\/test$/, '/command'), {
-          method: 'POST', headers: { 'X-Token': token }, body: document.getElementById('txt').value,
-        });
+        fetch(basePath + '/command', { method: 'POST', headers: { 'X-Token': token }, body: document.getElementById('txt').value });
       };
     }
   } else {
@@ -118,6 +126,10 @@ es.onmessage = (e) => {
   }
 };
 es.onerror = () => { status.textContent += ' [disconnected]'; };
+
+window.addEventListener('pagehide', () => {
+  if (token) navigator.sendBeacon(basePath + '/leave?token=' + token);
+});
 </script></body></html>`;
       return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
     }
@@ -127,24 +139,20 @@ es.onerror = () => { status.textContent += ' [disconnected]'; };
 
   async alarm() {
     const alive = [];
-    const dead = [];
     for (const s of this.sessions) {
       try {
         await withTimeout(s.writer.write(new TextEncoder().encode(`:hb\n\n`)), 3000);
         alive.push(s);
-      } catch (e) {
-        dead.push(s);
-      }
+      } catch (e) {}
     }
     this.sessions = alive;
 
     const hostPresent = alive.some((s) => s.role === "host");
 
-    if (this.hostToken) {
-      if (!hostPresent && this.hostGraceStartedAt === null) {
-        this.hostGraceStartedAt = Date.now();
-        await this.broadcast({ type: "status", text: `host disconnected, ${GRACE_MS / 1000}s grace period started` });
-      } else if (!hostPresent && Date.now() - this.hostGraceStartedAt >= GRACE_MS) {
+    if (this.hostToken && !hostPresent) {
+      if (this.hostGraceStartedAt === null) {
+        await this.startHostGraceIfNeeded();
+      } else if (Date.now() - this.hostGraceStartedAt >= GRACE_MS) {
         this.hostToken = null;
         this.hostGraceStartedAt = null;
         await this.broadcast({ type: "status", text: "grace period expired, host slot released" });
@@ -152,7 +160,10 @@ es.onerror = () => { status.textContent += ' [disconnected]'; };
     }
 
     if (this.sessions.length > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+      const pending = await this.ctx.storage.getAlarm();
+      if (pending === null || pending > Date.now() + HEARTBEAT_MS) {
+        await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+      }
     }
   }
 }
@@ -161,7 +172,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const match = url.pathname.match(/^\/room\/([^/]+)\//);
-    if (!match) return new Response("usage: /room/:roomId/connect|command|test", { status: 400 });
+    if (!match) return new Response("usage: /room/:roomId/connect|command|leave|test", { status: 400 });
     const id = env.ROOM.idFromName(match[1]);
     return env.ROOM.get(id).fetch(request);
   },
