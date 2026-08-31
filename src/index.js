@@ -25,8 +25,10 @@ export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sessions = []; // {writer, connId, token, role}
-    this.hostToken = null;
+    this.hostToken = null;       // 当前占位的 host token
+    this.lastHostToken = null;   // 上一个 host 的 token，grace 期间用来允许其"拿回"位置
     this.hostGraceStartedAt = null;
+    this.clientTokens = new Set(); // 记录哪些 token 是通过 /join 合法签发的 client
   }
 
   async broadcast(obj, targets = this.sessions) {
@@ -42,10 +44,19 @@ export class Room extends DurableObject {
 
   async startHostGraceIfNeeded() {
     if (this.hostToken && this.hostGraceStartedAt === null) {
+      this.lastHostToken = this.hostToken;
       this.hostGraceStartedAt = Date.now();
       await this.broadcast({ type: "status", text: `host disconnected, ${GRACE_MS / 1000}s grace period started` });
       await this.ctx.storage.setAlarm(Date.now() + GRACE_MS);
     }
+  }
+
+  // 服务端唯一真相：这个 token 现在到底是什么角色，不看客户端的 cookie 里怎么写
+  roleOf(token) {
+    if (token && token === this.hostToken) return "host";
+    if (token && this.hostGraceStartedAt !== null && token === this.lastHostToken) return "host-pending-reconnect";
+    if (token && this.clientTokens.has(token)) return "client";
+    return null; // 未知/无效 token
   }
 
   async fetch(request) {
@@ -53,49 +64,49 @@ export class Room extends DurableObject {
     const action = url.pathname.split("/").filter(Boolean).pop();
     const roomId = url.pathname.match(/^\/room\/([^/]+)\//)[1];
     const cookies = parseCookies(request);
+    const cookieToken = cookies[`room_${roomId}_token`];
 
     if (action === "join") {
       const wantRole = url.searchParams.get("role") === "host" ? "host" : "client";
-      let token, role;
+      let token;
 
       if (wantRole === "host") {
         if (this.hostToken) return new Response("host already connected", { status: 409 });
         token = crypto.randomUUID();
-        role = "host";
         this.hostToken = token;
       } else {
         token = crypto.randomUUID();
-        role = "client";
+        this.clientTokens.add(token);
       }
 
       const headers = new Headers();
       headers.set("Location", `/room/${roomId}/test`);
       headers.append("Set-Cookie", `room_${roomId}_token=${token}; Path=/room/${roomId}; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`);
-      headers.append("Set-Cookie", `room_${roomId}_role=${role}; Path=/room/${roomId}; Secure; SameSite=Lax; Max-Age=3600`);
       return new Response(null, { status: 302, headers });
     }
 
     if (action === "connect") {
-      const token = cookies[`room_${roomId}_token`];
-      const role = cookies[`room_${roomId}_role`];
-      if (!token || !role) return new Response("not joined: visit /join first", { status: 401 });
+      const kind = this.roleOf(cookieToken);
+      if (!kind) return new Response("not joined: visit /join first", { status: 401 });
 
+      let role = "client";
       let isReconnect = false;
-      if (role === "host") {
-        if (this.hostToken === token) {
-          isReconnect = this.hostGraceStartedAt !== null;
-          this.hostGraceStartedAt = null;
-        } else if (this.hostToken && this.hostToken !== token) {
-          return new Response("host slot taken by someone else", { status: 409 });
-        } else {
-          this.hostToken = token;
-        }
+
+      if (kind === "host") {
+        role = "host";
+      } else if (kind === "host-pending-reconnect") {
+        role = "host";
+        this.hostToken = cookieToken; // 拿回位置
+        this.hostGraceStartedAt = null;
+        isReconnect = true;
+      } else {
+        role = "client";
       }
 
-      const connId = crypto.randomUUID(); // 每条连接独立的 ID，跟身份 token 分开
+      const connId = crypto.randomUUID();
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-      this.sessions.push({ writer, connId, token, role });
+      this.sessions.push({ writer, connId, token: cookieToken, role });
 
       const encoder = new TextEncoder();
       writer.write(encoder.encode(`data: ${JSON.stringify({ type: "init", role, connId })}\n\n`)).catch(() => {});
@@ -109,8 +120,7 @@ export class Room extends DurableObject {
     }
 
     if (action === "command") {
-      const token = cookies[`room_${roomId}_token`];
-      if (!token || token !== this.hostToken) return new Response("forbidden: host only", { status: 403 });
+      if (!cookieToken || cookieToken !== this.hostToken) return new Response("forbidden: host only", { status: 403 });
       const text = await request.text();
       await this.broadcast({ type: "msg", text });
       return new Response(`sent to ${this.sessions.length} clients`);
@@ -119,7 +129,7 @@ export class Room extends DurableObject {
     if (action === "leave") {
       const connId = url.searchParams.get("conn");
       const target = this.sessions.find((s) => s.connId === connId);
-      this.sessions = this.sessions.filter((s) => s.connId !== connId); // 只删这一条连接
+      this.sessions = this.sessions.filter((s) => s.connId !== connId);
 
       if (target && target.role === "host" && target.token === this.hostToken) {
         const stillHasHostConn = this.sessions.some((s) => s.role === "host" && s.token === this.hostToken);
@@ -130,7 +140,7 @@ export class Room extends DurableObject {
 
     if (action === "test") {
       const html = `<!DOCTYPE html><html><body>
-<h3>Per-connection leave test</h3>
+<h3>Server-authoritative role test</h3>
 <div id="status">connecting...</div>
 <div id="controls"></div>
 <div id="log"></div>
@@ -187,6 +197,7 @@ window.addEventListener('pagehide', () => {
         await this.startHostGraceIfNeeded();
       } else if (Date.now() - this.hostGraceStartedAt >= GRACE_MS) {
         this.hostToken = null;
+        this.lastHostToken = null;
         this.hostGraceStartedAt = null;
         await this.broadcast({ type: "status", text: "grace period expired, host slot released" });
       }
