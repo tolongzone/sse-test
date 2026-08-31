@@ -48,7 +48,7 @@ export class Room extends DurableObject {
 <div id="log"></div>
 <script>
 const log = document.getElementById('log');
-const es = new EventSource('/connect');
+const es = new EventSource(window.location.pathname.replace(/\/test$/, '/connect'));
 es.onmessage = (e) => {
   const p = document.createElement('div');
   p.textContent = new Date().toLocaleTimeString() + ' - ' + e.data;
