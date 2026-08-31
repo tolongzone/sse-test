@@ -24,7 +24,7 @@ function parseCookies(request) {
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.sessions = [];
+    this.sessions = []; // {writer, connId, token, role}
     this.hostToken = null;
     this.hostGraceStartedAt = null;
   }
@@ -59,9 +59,7 @@ export class Room extends DurableObject {
       let token, role;
 
       if (wantRole === "host") {
-        if (this.hostToken) {
-          return new Response("host already connected", { status: 409 });
-        }
+        if (this.hostToken) return new Response("host already connected", { status: 409 });
         token = crypto.randomUUID();
         role = "host";
         this.hostToken = token;
@@ -72,7 +70,6 @@ export class Room extends DurableObject {
 
       const headers = new Headers();
       headers.set("Location", `/room/${roomId}/test`);
-      // 用两条各自独立的 cookie 存房间号和 token，简单直接
       headers.append("Set-Cookie", `room_${roomId}_token=${token}; Path=/room/${roomId}; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`);
       headers.append("Set-Cookie", `room_${roomId}_role=${role}; Path=/room/${roomId}; Secure; SameSite=Lax; Max-Age=3600`);
       return new Response(null, { status: 302, headers });
@@ -81,10 +78,7 @@ export class Room extends DurableObject {
     if (action === "connect") {
       const token = cookies[`room_${roomId}_token`];
       const role = cookies[`room_${roomId}_role`];
-
-      if (!token || !role) {
-        return new Response("not joined: visit /join first", { status: 401 });
-      }
+      if (!token || !role) return new Response("not joined: visit /join first", { status: 401 });
 
       let isReconnect = false;
       if (role === "host") {
@@ -94,16 +88,17 @@ export class Room extends DurableObject {
         } else if (this.hostToken && this.hostToken !== token) {
           return new Response("host slot taken by someone else", { status: 409 });
         } else {
-          this.hostToken = token; // grace 过期后原 host 槽已释放，凭旧 cookie 重新占位
+          this.hostToken = token;
         }
       }
 
+      const connId = crypto.randomUUID(); // 每条连接独立的 ID，跟身份 token 分开
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-      this.sessions.push({ writer, token, role });
+      this.sessions.push({ writer, connId, token, role });
 
       const encoder = new TextEncoder();
-      writer.write(encoder.encode(`data: ${JSON.stringify({ type: "init", role, token })}\n\n`)).catch(() => {});
+      writer.write(encoder.encode(`data: ${JSON.stringify({ type: "init", role, connId })}\n\n`)).catch(() => {});
 
       await this.ensureHeartbeat();
       if (isReconnect) await this.broadcast({ type: "status", text: "host reconnected" });
@@ -122,18 +117,20 @@ export class Room extends DurableObject {
     }
 
     if (action === "leave") {
-      const token = cookies[`room_${roomId}_token`];
-      const before = this.sessions.length;
-      this.sessions = this.sessions.filter((s) => s.token !== token);
-      if (token === this.hostToken && this.sessions.length !== before) {
-        await this.startHostGraceIfNeeded();
+      const connId = url.searchParams.get("conn");
+      const target = this.sessions.find((s) => s.connId === connId);
+      this.sessions = this.sessions.filter((s) => s.connId !== connId); // 只删这一条连接
+
+      if (target && target.role === "host" && target.token === this.hostToken) {
+        const stillHasHostConn = this.sessions.some((s) => s.role === "host" && s.token === this.hostToken);
+        if (!stillHasHostConn) await this.startHostGraceIfNeeded();
       }
       return new Response("ok");
     }
 
     if (action === "test") {
       const html = `<!DOCTYPE html><html><body>
-<h3>Cookie-based session test</h3>
+<h3>Per-connection leave test</h3>
 <div id="status">connecting...</div>
 <div id="controls"></div>
 <div id="log"></div>
@@ -142,12 +139,14 @@ const log = document.getElementById('log');
 const status = document.getElementById('status');
 const controls = document.getElementById('controls');
 const basePath = window.location.pathname.replace(/\\/test$/, '');
+let myConnId = null;
 const es = new EventSource(basePath + '/connect');
 
 es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.type === 'init') {
-    status.textContent = 'role: ' + data.role + ' (from cookie)';
+    myConnId = data.connId;
+    status.textContent = 'role: ' + data.role + ' | connId: ' + myConnId.slice(0, 8);
     if (data.role === 'host') {
       controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
       document.getElementById('send').onclick = () => {
@@ -160,12 +159,10 @@ es.onmessage = (e) => {
     log.prepend(p);
   }
 };
-es.onerror = () => {
-  status.textContent = '[not connected / disconnected — try /join first]';
-};
+es.onerror = () => { status.textContent = '[not connected / disconnected — try /join first]'; };
 
 window.addEventListener('pagehide', () => {
-  navigator.sendBeacon(basePath + '/leave');
+  if (myConnId) navigator.sendBeacon(basePath + '/leave?conn=' + myConnId);
 });
 </script></body></html>`;
       return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
@@ -183,7 +180,7 @@ window.addEventListener('pagehide', () => {
       } catch (e) {}
     }
     this.sessions = alive;
-    const hostPresent = alive.some((s) => s.role === "host");
+    const hostPresent = alive.some((s) => s.role === "host" && s.token === this.hostToken);
 
     if (this.hostToken && !hostPresent) {
       if (this.hostGraceStartedAt === null) {
