@@ -10,23 +10,36 @@ function withTimeout(promise, ms) {
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.sessions = [];
+    this.sessions = []; // {writer, token, role}
+    this.hostToken = null;
   }
 
   async fetch(request) {
     const url = new URL(request.url);
-    // 路径形如 /room/aaa/connect，取最后一段作为动作
     const action = url.pathname.split("/").filter(Boolean).pop();
 
     if (action === "connect") {
+      const wantRole = url.searchParams.get("role") === "host" ? "host" : "client";
+
+      if (wantRole === "host" && this.hostToken) {
+        return new Response("host already connected", { status: 409 });
+      }
+
+      const token = crypto.randomUUID();
+      const role = wantRole;
+      if (role === "host") this.hostToken = token;
+
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-      this.sessions.push(writer);
+      this.sessions.push({ writer, token, role });
+
       const encoder = new TextEncoder();
-      writer.write(encoder.encode(`data: connected, total=${this.sessions.length}\n\n`)).catch(() => {});
+      const initMsg = JSON.stringify({ type: "init", role, token });
+      writer.write(encoder.encode(`data: ${initMsg}\n\n`)).catch(() => {});
 
       request.signal.addEventListener("abort", () => {
-        this.sessions = this.sessions.filter((s) => s !== writer);
+        this.sessions = this.sessions.filter((s) => s.writer !== writer);
+        if (role === "host" && this.hostToken === token) this.hostToken = null;
       });
 
       return new Response(readable, {
@@ -34,11 +47,17 @@ export class Room extends DurableObject {
       });
     }
 
-    if (action === "broadcast") {
+    if (action === "command") {
+      const token = request.headers.get("X-Token");
+      if (!token || token !== this.hostToken) {
+        return new Response("forbidden: host only", { status: 403 });
+      }
+      const text = await request.text();
       const encoder = new TextEncoder();
-      const msg = encoder.encode(`data: broadcast at ${new Date().toISOString()}\n\n`);
+      const msg = JSON.stringify({ type: "msg", text });
+      const payload = encoder.encode(`data: ${msg}\n\n`);
       const results = await Promise.allSettled(
-        this.sessions.map((w) => withTimeout(w.write(msg), 3000))
+        this.sessions.map((s) => withTimeout(s.writer.write(payload), 3000))
       );
       this.sessions = this.sessions.filter((_, i) => results[i].status === "fulfilled");
       return new Response(`sent to ${this.sessions.length} clients`);
@@ -46,21 +65,44 @@ export class Room extends DurableObject {
 
     if (action === "test") {
       const html = `<!DOCTYPE html><html><body>
-<h3>SSE test</h3>
+<h3>Role test</h3>
+<div id="status">connecting...</div>
+<div id="controls"></div>
 <div id="log"></div>
 <script>
 const log = document.getElementById('log');
-const es = new EventSource(window.location.pathname.replace(/\\/test$/, '/connect'));
+const status = document.getElementById('status');
+const controls = document.getElementById('controls');
+let token = null;
+
+const connectUrl = window.location.pathname.replace(/\\/test$/, '/connect')
+  + (window.location.search.includes('role=host') ? '?role=host' : '');
+const es = new EventSource(connectUrl);
+
 es.onmessage = (e) => {
-  const p = document.createElement('div');
-  p.textContent = new Date().toLocaleTimeString() + ' - ' + e.data;
-  log.prepend(p);
+  const data = JSON.parse(e.data);
+  if (data.type === 'init') {
+    token = data.token;
+    status.textContent = 'role: ' + data.role;
+    if (data.role === 'host') {
+      controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
+      document.getElementById('send').onclick = () => {
+        const text = document.getElementById('txt').value;
+        fetch(window.location.pathname.replace(/\\/test$/, '/command'), {
+          method: 'POST',
+          headers: { 'X-Token': token },
+          body: text,
+        });
+      };
+    }
+  } else if (data.type === 'msg') {
+    const p = document.createElement('div');
+    p.textContent = new Date().toLocaleTimeString() + ' - ' + data.text;
+    log.prepend(p);
+  }
 };
 es.onerror = () => {
-  const p = document.createElement('div');
-  p.textContent = new Date().toLocaleTimeString() + ' - [disconnected]';
-  p.style.color = 'red';
-  log.prepend(p);
+  status.textContent = '[disconnected]';
 };
 </script></body></html>`;
       return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
@@ -76,12 +118,12 @@ export default {
     const match = url.pathname.match(/^\/room\/([^/]+)\//);
 
     if (!match) {
-      return new Response("usage: /room/:roomId/connect|broadcast|test", { status: 400 });
+      return new Response("usage: /room/:roomId/connect|command|test", { status: 400 });
     }
 
     const roomId = match[1];
     const id = env.ROOM.idFromName(roomId);
     const stub = env.ROOM.get(id);
-    return stub.fetch(request); // 原样转发，不重建
+    return stub.fetch(request);
   },
 };
