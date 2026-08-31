@@ -24,11 +24,11 @@ function parseCookies(request) {
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.sessions = []; // {writer, connId, token, role}
-    this.hostToken = null;       // 当前占位的 host token
-    this.lastHostToken = null;   // 上一个 host 的 token，grace 期间用来允许其"拿回"位置
+    this.sessions = [];
+    this.hostToken = null;
+    this.lastHostToken = null;
     this.hostGraceStartedAt = null;
-    this.clientTokens = new Set(); // 记录哪些 token 是通过 /join 合法签发的 client
+    this.clientTokens = new Set();
   }
 
   async broadcast(obj, targets = this.sessions) {
@@ -51,56 +51,46 @@ export class Room extends DurableObject {
     }
   }
 
-  // 服务端唯一真相：这个 token 现在到底是什么角色，不看客户端的 cookie 里怎么写
   roleOf(token) {
     if (token && token === this.hostToken) return "host";
     if (token && this.hostGraceStartedAt !== null && token === this.lastHostToken) return "host-pending-reconnect";
     if (token && this.clientTokens.has(token)) return "client";
-    return null; // 未知/无效 token
+    return null;
   }
 
   async fetch(request) {
     const url = new URL(request.url);
-    const action = url.pathname.split("/").filter(Boolean).pop();
-    const roomId = url.pathname.match(/^\/room\/([^/]+)\//)[1];
+    const action = url.pathname.split("/").filter(Boolean).pop() || "root";
     const cookies = parseCookies(request);
-    const cookieToken = cookies[`room_${roomId}_token`];
+    const cookieToken = cookies["token"];
 
     if (action === "join") {
       const wantRole = url.searchParams.get("role") === "host" ? "host" : "client";
       let token;
-
       if (wantRole === "host") {
-        if (this.hostToken) return new Response("host already connected", { status: 409 });
+        if (this.hostToken) return new Response(JSON.stringify({ error: "host taken" }), { status: 409 });
         token = crypto.randomUUID();
         this.hostToken = token;
       } else {
         token = crypto.randomUUID();
         this.clientTokens.add(token);
       }
-
-      const headers = new Headers();
-      headers.set("Location", `/room/${roomId}/test`);
-      headers.append("Set-Cookie", `room_${roomId}_token=${token}; Path=/room/${roomId}; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`);
-      return new Response(null, { status: 302, headers });
+      return new Response(JSON.stringify({ token, role: wantRole }), { headers: { "Content-Type": "application/json" } });
     }
 
     if (action === "connect") {
       const kind = this.roleOf(cookieToken);
-      if (!kind) return new Response("not joined: visit /join first", { status: 401 });
+      if (!kind) return new Response("not joined", { status: 401 });
 
       let role = "client";
       let isReconnect = false;
-
       if (kind === "host") {
         role = "host";
       } else if (kind === "host-pending-reconnect") {
         role = "host";
-        this.hostToken = cookieToken; // 拿回位置
+        this.hostToken = cookieToken;
         this.hostGraceStartedAt = null;
         isReconnect = true;
-      } else {
-        role = "client";
       }
 
       const connId = crypto.randomUUID();
@@ -120,7 +110,7 @@ export class Room extends DurableObject {
     }
 
     if (action === "command") {
-      if (!cookieToken || cookieToken !== this.hostToken) return new Response("forbidden: host only", { status: 403 });
+      if (!cookieToken || cookieToken !== this.hostToken) return new Response("forbidden", { status: 403 });
       const text = await request.text();
       await this.broadcast({ type: "msg", text });
       return new Response(`sent to ${this.sessions.length} clients`);
@@ -130,7 +120,6 @@ export class Room extends DurableObject {
       const connId = url.searchParams.get("conn");
       const target = this.sessions.find((s) => s.connId === connId);
       this.sessions = this.sessions.filter((s) => s.connId !== connId);
-
       if (target && target.role === "host" && target.token === this.hostToken) {
         const stillHasHostConn = this.sessions.some((s) => s.role === "host" && s.token === this.hostToken);
         if (!stillHasHostConn) await this.startHostGraceIfNeeded();
@@ -138,9 +127,10 @@ export class Room extends DurableObject {
       return new Response("ok");
     }
 
-    if (action === "test") {
+    if (action === "page") {
+      const kind = this.roleOf(cookieToken);
       const html = `<!DOCTYPE html><html><body>
-<h3>Server-authoritative role test</h3>
+<h3>${kind === "host" || kind === "host-pending-reconnect" ? "Host" : "Client"} page (URL has no suffix)</h3>
 <div id="status">connecting...</div>
 <div id="controls"></div>
 <div id="log"></div>
@@ -148,10 +138,8 @@ export class Room extends DurableObject {
 const log = document.getElementById('log');
 const status = document.getElementById('status');
 const controls = document.getElementById('controls');
-const basePath = window.location.pathname.replace(/\\/test$/, '');
 let myConnId = null;
-const es = new EventSource(basePath + '/connect');
-
+const es = new EventSource('/connect');
 es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.type === 'init') {
@@ -160,7 +148,7 @@ es.onmessage = (e) => {
     if (data.role === 'host') {
       controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
       document.getElementById('send').onclick = () => {
-        fetch(basePath + '/command', { method: 'POST', body: document.getElementById('txt').value });
+        fetch('/command', { method: 'POST', body: document.getElementById('txt').value });
       };
     }
   } else {
@@ -169,10 +157,9 @@ es.onmessage = (e) => {
     log.prepend(p);
   }
 };
-es.onerror = () => { status.textContent = '[not connected / disconnected — try /join first]'; };
-
+es.onerror = () => { status.textContent = '[disconnected]'; };
 window.addEventListener('pagehide', () => {
-  if (myConnId) navigator.sendBeacon(basePath + '/leave?conn=' + myConnId);
+  if (myConnId) navigator.sendBeacon('/leave?conn=' + myConnId);
 });
 </script></body></html>`;
       return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
@@ -215,9 +202,33 @@ window.addEventListener('pagehide', () => {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const match = url.pathname.match(/^\/room\/([^/]+)\//);
-    if (!match) return new Response("usage: /room/:roomId/join|connect|command|leave|test", { status: 400 });
-    const id = env.ROOM.idFromName(match[1]);
-    return env.ROOM.get(id).fetch(request);
+    const cookies = parseCookies(request);
+    const roomCookie = cookies["room"];
+
+    // 根路径且没有房间 cookie -> 自动建房间，设为 host
+    if (url.pathname === "/" && !roomCookie) {
+      const roomId = crypto.randomUUID();
+      const id = env.ROOM.idFromName(roomId);
+      const stub = env.ROOM.get(id);
+      const joinResp = await stub.fetch(new Request("https://internal/join?role=host"));
+      const { token } = await joinResp.json();
+
+      const headers = new Headers();
+      headers.set("Location", "/");
+      headers.append("Set-Cookie", `room=${roomId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`);
+      headers.append("Set-Cookie", `token=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`);
+      return new Response(null, { status: 302, headers });
+    }
+
+    if (!roomCookie) return new Response("no room", { status: 401 });
+
+    const id = env.ROOM.idFromName(roomCookie);
+    const stub = env.ROOM.get(id);
+
+    if (url.pathname === "/") {
+      return stub.fetch(new Request("https://internal/page", { headers: request.headers }));
+    }
+
+    return stub.fetch(request); // /connect /command /leave 直接转发
   },
 };
