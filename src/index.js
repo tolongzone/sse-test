@@ -70,8 +70,22 @@ es.onerror = () => {
 
 export default {
   async fetch(request, env) {
-    const id = env.ROOM.idFromName("test-room");
+    const url = new URL(request.url);
+    const match = url.pathname.match(/^\/room\/([^/]+)(\/.*)?$/);
+
+    if (!match) {
+      return new Response("usage: /room/:roomId/connect|broadcast|test", { status: 400 });
+    }
+
+    const roomId = match[1];
+    const subPath = match[2] || "/";
+
+    const id = env.ROOM.idFromName(roomId);
     const stub = env.ROOM.get(id);
-    return stub.fetch(request);
+
+    // 把去掉房间前缀的子路径转发给 DO
+    const innerUrl = new URL(request.url);
+    innerUrl.pathname = subPath;
+    return stub.fetch(new Request(innerUrl, request));
   },
 };
