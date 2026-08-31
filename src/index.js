@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const GRACE_MS = 15000;
+const HEARTBEAT_MS = 5000;
 
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -14,15 +15,20 @@ export class Room extends DurableObject {
     super(ctx, env);
     this.sessions = []; // {writer, token, role}
     this.hostToken = null;
+    this.hostGraceStartedAt = null;
   }
 
-  async broadcast(obj) {
+  async broadcast(obj, targets = this.sessions) {
     const encoder = new TextEncoder();
     const payload = encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
-    const results = await Promise.allSettled(
-      this.sessions.map((s) => withTimeout(s.writer.write(payload), 3000))
-    );
-    this.sessions = this.sessions.filter((_, i) => results[i].status === "fulfilled");
+    await Promise.allSettled(targets.map((s) => withTimeout(s.writer.write(payload), 3000)));
+  }
+
+  async ensureHeartbeat() {
+    const existing = await this.ctx.storage.getAlarm();
+    if (existing === null) {
+      await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+    }
   }
 
   async fetch(request) {
@@ -34,14 +40,14 @@ export class Room extends DurableObject {
       const reconnectToken = url.searchParams.get("token");
 
       let token, role;
+      let isReconnect = false;
 
       if (wantRole === "host") {
         if (this.hostToken && reconnectToken === this.hostToken) {
-          // 宽限期内重连
           token = this.hostToken;
           role = "host";
-          await this.ctx.storage.deleteAlarm();
-          await this.broadcast({ type: "status", text: "host reconnected" });
+          isReconnect = true;
+          this.hostGraceStartedAt = null;
         } else if (this.hostToken) {
           return new Response("host already connected", { status: 409 });
         } else {
@@ -59,16 +65,10 @@ export class Room extends DurableObject {
       this.sessions.push({ writer, token, role });
 
       const encoder = new TextEncoder();
-      const initMsg = JSON.stringify({ type: "init", role, token });
-      writer.write(encoder.encode(`data: ${initMsg}\n\n`)).catch(() => {});
+      writer.write(encoder.encode(`data: ${JSON.stringify({ type: "init", role, token })}\n\n`)).catch(() => {});
 
-      request.signal.addEventListener("abort", () => {
-        this.sessions = this.sessions.filter((s) => s.writer !== writer);
-        if (role === "host" && this.hostToken === token) {
-          this.ctx.storage.setAlarm(Date.now() + GRACE_MS);
-          this.broadcast({ type: "status", text: `host disconnected, ${GRACE_MS / 1000}s grace period started` });
-        }
-      });
+      await this.ensureHeartbeat();
+      if (isReconnect) await this.broadcast({ type: "status", text: "host reconnected" });
 
       return new Response(readable, {
         headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
@@ -87,7 +87,7 @@ export class Room extends DurableObject {
 
     if (action === "test") {
       const html = `<!DOCTYPE html><html><body>
-<h3>Grace period test</h3>
+<h3>Heartbeat + grace period test</h3>
 <div id="status">connecting...</div>
 <div id="controls"></div>
 <div id="log"></div>
@@ -96,11 +96,8 @@ const log = document.getElementById('log');
 const status = document.getElementById('status');
 const controls = document.getElementById('controls');
 let token = null;
-
 const params = new URLSearchParams(window.location.search);
-let connectUrl = window.location.pathname.replace(/\\/test$/, '/connect') + '?' + params.toString();
-const es = new EventSource(connectUrl);
-
+const es = new EventSource(window.location.pathname.replace(/\\/test$/, '/connect') + '?' + params.toString());
 es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.type === 'init') {
@@ -109,9 +106,8 @@ es.onmessage = (e) => {
     if (data.role === 'host') {
       controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
       document.getElementById('send').onclick = () => {
-        const text = document.getElementById('txt').value;
         fetch(window.location.pathname.replace(/\\/test$/, '/command'), {
-          method: 'POST', headers: { 'X-Token': token }, body: text,
+          method: 'POST', headers: { 'X-Token': token }, body: document.getElementById('txt').value,
         });
       };
     }
@@ -121,9 +117,7 @@ es.onmessage = (e) => {
     log.prepend(p);
   }
 };
-es.onerror = () => {
-  status.textContent += ' [disconnected]';
-};
+es.onerror = () => { status.textContent += ' [disconnected]'; };
 </script></body></html>`;
       return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
     }
@@ -132,8 +126,34 @@ es.onerror = () => {
   }
 
   async alarm() {
-    this.hostToken = null;
-    await this.broadcast({ type: "status", text: "grace period expired, host slot released" });
+    const alive = [];
+    const dead = [];
+    for (const s of this.sessions) {
+      try {
+        await withTimeout(s.writer.write(new TextEncoder().encode(`:hb\n\n`)), 3000);
+        alive.push(s);
+      } catch (e) {
+        dead.push(s);
+      }
+    }
+    this.sessions = alive;
+
+    const hostPresent = alive.some((s) => s.role === "host");
+
+    if (this.hostToken) {
+      if (!hostPresent && this.hostGraceStartedAt === null) {
+        this.hostGraceStartedAt = Date.now();
+        await this.broadcast({ type: "status", text: `host disconnected, ${GRACE_MS / 1000}s grace period started` });
+      } else if (!hostPresent && Date.now() - this.hostGraceStartedAt >= GRACE_MS) {
+        this.hostToken = null;
+        this.hostGraceStartedAt = null;
+        await this.broadcast({ type: "status", text: "grace period expired, host slot released" });
+      }
+    }
+
+    if (this.sessions.length > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+    }
   }
 }
 
