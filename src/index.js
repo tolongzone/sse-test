@@ -158,20 +158,53 @@ export class Room extends DurableObject {
 }
 
 function renderPage(roomId, token, role) {
-  const controlsHtml = role === "host"
-    ? `<input id="txt" placeholder="message"><button id="send">send</button>`
-    : ``;
+  const isHost = role === "host";
   return `<!DOCTYPE html><html><body>
-<h3>${role === "host" ? "Host" : "Client"} page</h3>
+<h3>${isHost ? "Host" : "Client"} page — gameState sync skeleton</h3>
 <div id="status">connecting...</div>
-<div id="controls">${controlsHtml}</div>
-<div id="log"></div>
+${isHost ? `<div><button id="score-plus">东 加10分</button> <button id="push">推送状态</button></div>` : ``}
+<pre id="state-view">(等待状态...)</pre>
 <script>
 window.__ROOM_ID__ = ${JSON.stringify(roomId)};
 window.__TOKEN__ = ${JSON.stringify(token)};
-const log = document.getElementById('log');
 const status = document.getElementById('status');
+const stateView = document.getElementById('state-view');
 let myConnId = null;
+
+// 和原项目 index.html 里 init() 时的 gameState 结构保持一致（先只放骨架用得到的字段）
+let gameState = {
+  isRunning: false,
+  screen: 'idle',
+  difen: 20, beilv: 1, danbu: 10,
+  initialDealer: '东', currentDealer: '东', missingDir: null,
+  roundsCount: 1, gamesCount: 0, records: [],
+  players: { 东:{name:'',current:0,benzhuang:0,buci:0}, 南:{name:'',current:0,benzhuang:0,buci:0}, 西:{name:'',current:0,benzhuang:0,buci:0}, 北:{name:'',current:0,benzhuang:0,buci:0} }
+};
+
+// 和原项目 pushStateToRemote() 逻辑一致：拼出完整 state payload 再广播
+function pushState() {
+  const state = {
+    action: 'state',
+    players: {},
+    isRunning: gameState.isRunning,
+    screen: gameState.screen,
+    qrcodeOpen: false,
+    difen: gameState.difen, beilv: gameState.beilv, danbu: gameState.danbu,
+    initialDealer: gameState.initialDealer, currentDealer: gameState.currentDealer, missingDir: gameState.missingDir,
+    gamesCount: gameState.gamesCount, roundsCount: gameState.roundsCount, records: gameState.records
+  };
+  ['东','南','西','北'].forEach(dir => {
+    const p = gameState.players[dir];
+    const base = gameState.difen > p.current ? gameState.difen + gameState.difen - p.current : gameState.difen;
+    state.players[dir] = { name: p.name, current: p.current, benzhuang: p.benzhuang, buci: p.buci,
+      jiesuan: base + p.buci * gameState.danbu, isDealer: dir === gameState.currentDealer, isMissing: dir === gameState.missingDir };
+  });
+  fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({}, state, { token: window.__TOKEN__ })),
+  });
+}
 
 const es = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect?token=' + encodeURIComponent(window.__TOKEN__));
 es.onmessage = (e) => {
@@ -179,29 +212,26 @@ es.onmessage = (e) => {
   if (data.type === 'init') {
     myConnId = data.connId;
     status.textContent = 'role: ' + data.role + ' | room: ' + window.__ROOM_ID__.slice(0,8);
-    const sendBtn = document.getElementById('send');
-    if (sendBtn) {
-      sendBtn.onclick = () => {
-        fetch('/_room/' + window.__ROOM_ID__ + '/command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: window.__TOKEN__, text: document.getElementById('txt').value }),
-        });
-      };
-    }
-  } else {
-    const p = document.createElement('div');
-    p.textContent = new Date().toLocaleTimeString() + ' - [' + data.type + '] ' + JSON.stringify(data);
-    log.prepend(p);
+    ${isHost ? `pushState();` : ``}
+  } else if (data.type === 'msg' && data.action === 'state') {
+    stateView.textContent = JSON.stringify(data.players, null, 2);
   }
 };
 es.onerror = () => { status.textContent = '[disconnected]'; };
+
+${isHost ? `
+document.getElementById('score-plus').onclick = () => {
+  gameState.players['东'].current += 10;
+  pushState();
+};
+document.getElementById('push').onclick = pushState;
+` : ``}
 
 window.addEventListener('pagehide', () => {
   if (myConnId) navigator.sendBeacon('/_room/' + window.__ROOM_ID__ + '/leave?conn=' + myConnId);
 });
 </script>
-${role === "host" ? `<hr><p>扫码加入(client):</p><img src="/_room/${roomId}/qrcode" width="200" height="200">` : ""}
+${isHost ? `<hr><p>扫码加入(client):</p >< img src="/_room/${roomId}/qrcode" width="200" height="200">` : ""}
 </body></html>`;
 }
 
