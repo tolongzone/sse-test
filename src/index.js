@@ -215,14 +215,17 @@ export default {
       const id = env.ROOM.idFromName(roomId);
       const stub = env.ROOM.get(id);
 
-      if (action === "qrcode") {
-        const enterUrl = `${url.origin}/_room/${roomId}/enter`;
-        const qr = qrcode(0, "M");
-        qr.addData(enterUrl);
-        qr.make();
-        const svg = qr.createSvgTag({ cellSize: 4, margin: 4 });
-        return new Response(svg, { headers: { "Content-Type": "image/svg+xml" } });
-      }
+if (action === "qrcode") {
+  const enterUrl = `${url.origin}/_room/${roomId}/enter`;
+  const qr = qrcode(0, "M");
+  qr.addData(enterUrl);
+  qr.make();
+  let svg = qr.createSvgTag({ cellSize: 4, margin: 4 });
+  if (!svg.includes("xmlns=")) {
+    svg = svg.replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ');
+  }
+  return new Response(svg, { headers: { "Content-Type": "image/svg+xml" } });
+}
 
       if (action === "enter") {
         const joinResp = await stub.fetch(new Request("https://internal/join"));
