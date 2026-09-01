@@ -201,7 +201,7 @@ window.addEventListener('pagehide', () => {
   if (myConnId) navigator.sendBeacon('/_room/' + window.__ROOM_ID__ + '/leave?conn=' + myConnId);
 });
 </script>
-${role === "host" ? `<hr><p>扫码加入(client):</p >< img src="/_room/${roomId}/qrcode" width="200" height="200">` : ""}
+${role === "host" ? `<hr><p>扫码加入(client):</p><img src="/_room/${roomId}/qrcode" width="200" height="200">` : ""}
 </body></html>`;
 }
 
