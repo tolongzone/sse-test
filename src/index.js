@@ -10,21 +10,10 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-function parseCookies(request) {
-  const header = request.headers.get("Cookie") || "";
-  const out = {};
-  header.split(";").forEach((pair) => {
-    const idx = pair.indexOf("=");
-    if (idx === -1) return;
-    out[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
-  });
-  return out;
-}
-
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.sessions = [];
+    this.sessions = []; // {writer, connId, token, role}
     this.hostToken = null;
     this.lastHostToken = null;
     this.hostGraceStartedAt = null;
@@ -60,27 +49,40 @@ export class Room extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
-    const action = url.pathname.split("/").filter(Boolean).pop() || "root";
-    const cookies = parseCookies(request);
-    const cookieToken = cookies["token"];
+    const action = url.pathname.split("/").filter(Boolean).pop();
+
+    // 显式参数优先，其次才看 query（给 sendBeacon/EventSource 这类只能走 query 的场景用）
+    let token;
+    if (request.method === "POST") {
+      const clone = request.clone();
+      try {
+        const body = await clone.json();
+        token = body.token;
+      } catch (e) {
+        token = url.searchParams.get("token");
+      }
+    } else {
+      token = url.searchParams.get("token");
+    }
+
+    if (action === "createhost") {
+      // 只由主 Worker 内部调用，创建这个房间的 host 身份
+      if (this.hostToken) return new Response(JSON.stringify({ error: "already has host" }), { status: 409 });
+      const newToken = crypto.randomUUID();
+      this.hostToken = newToken;
+      return new Response(JSON.stringify({ token: newToken }), { headers: { "Content-Type": "application/json" } });
+    }
 
     if (action === "join") {
-      const wantRole = url.searchParams.get("role") === "host" ? "host" : "client";
-      let token;
-      if (wantRole === "host") {
-        if (this.hostToken) return new Response(JSON.stringify({ error: "host taken" }), { status: 409 });
-        token = crypto.randomUUID();
-        this.hostToken = token;
-      } else {
-        token = crypto.randomUUID();
-        this.clientTokens.add(token);
-      }
-      return new Response(JSON.stringify({ token, role: wantRole }), { headers: { "Content-Type": "application/json" } });
+      // client 加入（对应扫二维码）
+      const newToken = crypto.randomUUID();
+      this.clientTokens.add(newToken);
+      return new Response(JSON.stringify({ token: newToken, role: "client" }), { headers: { "Content-Type": "application/json" } });
     }
 
     if (action === "connect") {
-      const kind = this.roleOf(cookieToken);
-      if (!kind) return new Response("not joined", { status: 401 });
+      const kind = this.roleOf(token);
+      if (!kind) return new Response("unauthorized", { status: 401 });
 
       let role = "client";
       let isReconnect = false;
@@ -88,7 +90,7 @@ export class Room extends DurableObject {
         role = "host";
       } else if (kind === "host-pending-reconnect") {
         role = "host";
-        this.hostToken = cookieToken;
+        this.hostToken = token;
         this.hostGraceStartedAt = null;
         isReconnect = true;
       }
@@ -96,7 +98,7 @@ export class Room extends DurableObject {
       const connId = crypto.randomUUID();
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-      this.sessions.push({ writer, connId, token: cookieToken, role });
+      this.sessions.push({ writer, connId, token, role });
 
       const encoder = new TextEncoder();
       writer.write(encoder.encode(`data: ${JSON.stringify({ type: "init", role, connId })}\n\n`)).catch(() => {});
@@ -110,9 +112,10 @@ export class Room extends DurableObject {
     }
 
     if (action === "command") {
-      if (!cookieToken || cookieToken !== this.hostToken) return new Response("forbidden", { status: 403 });
-      const text = await request.text();
-      await this.broadcast({ type: "msg", text });
+      if (!token || token !== this.hostToken) return new Response("forbidden", { status: 403 });
+      const body = await request.clone().json().catch(() => ({}));
+      const { token: _drop, ...payload } = body;
+      await this.broadcast({ type: "msg", ...payload });
       return new Response(`sent to ${this.sessions.length} clients`);
     }
 
@@ -125,44 +128,6 @@ export class Room extends DurableObject {
         if (!stillHasHostConn) await this.startHostGraceIfNeeded();
       }
       return new Response("ok");
-    }
-
-    if (action === "page") {
-      const kind = this.roleOf(cookieToken);
-      const html = `<!DOCTYPE html><html><body>
-<h3>${kind === "host" || kind === "host-pending-reconnect" ? "Host" : "Client"} page (URL has no suffix)</h3>
-<div id="status">connecting...</div>
-<div id="controls"></div>
-<div id="log"></div>
-<script>
-const log = document.getElementById('log');
-const status = document.getElementById('status');
-const controls = document.getElementById('controls');
-let myConnId = null;
-const es = new EventSource('/connect');
-es.onmessage = (e) => {
-  const data = JSON.parse(e.data);
-  if (data.type === 'init') {
-    myConnId = data.connId;
-    status.textContent = 'role: ' + data.role + ' | connId: ' + myConnId.slice(0, 8);
-    if (data.role === 'host') {
-      controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
-      document.getElementById('send').onclick = () => {
-        fetch('/command', { method: 'POST', body: document.getElementById('txt').value });
-      };
-    }
-  } else {
-    const p = document.createElement('div');
-    p.textContent = new Date().toLocaleTimeString() + ' - [' + data.type + '] ' + data.text;
-    log.prepend(p);
-  }
-};
-es.onerror = () => { status.textContent = '[disconnected]'; };
-window.addEventListener('pagehide', () => {
-  if (myConnId) navigator.sendBeacon('/leave?conn=' + myConnId);
-});
-</script></body></html>`;
-      return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
     }
 
     return new Response("not found", { status: 404 });
@@ -199,36 +164,78 @@ window.addEventListener('pagehide', () => {
   }
 }
 
+function renderHostPage(roomId, token) {
+  return `<!DOCTYPE html><html><body>
+<h3>Host page (URL 全程干净，无后缀无参数)</h3>
+<div id="status">connecting...</div>
+<div id="controls"></div>
+<div id="log"></div>
+<script>
+window.__ROOM_ID__ = ${JSON.stringify(roomId)};
+window.__TOKEN__ = ${JSON.stringify(token)};
+const log = document.getElementById('log');
+const status = document.getElementById('status');
+const controls = document.getElementById('controls');
+let myConnId = null;
+
+const es = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect?token=' + encodeURIComponent(window.__TOKEN__));
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  if (data.type === 'init') {
+    myConnId = data.connId;
+    status.textContent = 'role: ' + data.role + ' | room: ' + window.__ROOM_ID__.slice(0,8);
+    if (data.role === 'host') {
+      controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
+      document.getElementById('send').onclick = () => {
+        fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: window.__TOKEN__, text: document.getElementById('txt').value }),
+        });
+      };
+    }
+  } else {
+    const p = document.createElement('div');
+    p.textContent = new Date().toLocaleTimeString() + ' - [' + data.type + '] ' + JSON.stringify(data);
+    log.prepend(p);
+  }
+};
+es.onerror = () => { status.textContent = '[disconnected]'; };
+
+window.addEventListener('pagehide', () => {
+  if (myConnId) navigator.sendBeacon('/_room/' + window.__ROOM_ID__ + '/leave?conn=' + myConnId);
+});
+</script></body></html>`;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const cookies = parseCookies(request);
-    const roomCookie = cookies["room"];
 
-    // 根路径且没有房间 cookie -> 自动建房间，设为 host
-    if (url.pathname === "/" && !roomCookie) {
+    // 内部路由：/_room/:roomId/:action —— 用来转发给具体的 DO
+    const match = url.pathname.match(/^\/_room\/([^/]+)\/(.+)$/);
+    if (match) {
+      const [, roomId, action] = match;
+      const id = env.ROOM.idFromName(roomId);
+      const stub = env.ROOM.get(id);
+      const innerUrl = new URL(request.url);
+      innerUrl.pathname = "/" + action;
+      return stub.fetch(new Request(innerUrl, request));
+    }
+
+    // 根路径：每次都创建全新房间，room_id/token 直接嵌进页面，不依赖 Cookie
+    if (url.pathname === "/") {
       const roomId = crypto.randomUUID();
       const id = env.ROOM.idFromName(roomId);
       const stub = env.ROOM.get(id);
-      const joinResp = await stub.fetch(new Request("https://internal/join?role=host"));
-      const { token } = await joinResp.json();
+      const resp = await stub.fetch(new Request("https://internal/createhost", { method: "POST" }));
+      const { token } = await resp.json();
 
-      const headers = new Headers();
-      headers.set("Location", "/");
-      headers.append("Set-Cookie", `room=${roomId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`);
-      headers.append("Set-Cookie", `token=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=3600`);
-      return new Response(null, { status: 302, headers });
+      return new Response(renderHostPage(roomId, token), {
+        headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" },
+      });
     }
 
-    if (!roomCookie) return new Response("no room", { status: 401 });
-
-    const id = env.ROOM.idFromName(roomCookie);
-    const stub = env.ROOM.get(id);
-
-    if (url.pathname === "/") {
-      return stub.fetch(new Request("https://internal/page", { headers: request.headers }));
-    }
-
-    return stub.fetch(request); // /connect /command /leave 直接转发
+    return new Response("not found", { status: 404 });
   },
 };
