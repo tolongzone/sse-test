@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import qrcode from "qrcode-generator";
 
 const GRACE_MS = 15000;
 const HEARTBEAT_MS = 5000;
@@ -13,7 +14,7 @@ function withTimeout(promise, ms) {
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.sessions = []; // {writer, connId, token, role}
+    this.sessions = [];
     this.hostToken = null;
     this.lastHostToken = null;
     this.hostGraceStartedAt = null;
@@ -51,22 +52,15 @@ export class Room extends DurableObject {
     const url = new URL(request.url);
     const action = url.pathname.split("/").filter(Boolean).pop();
 
-    // 显式参数优先，其次才看 query（给 sendBeacon/EventSource 这类只能走 query 的场景用）
     let token;
     if (request.method === "POST") {
-      const clone = request.clone();
-      try {
-        const body = await clone.json();
-        token = body.token;
-      } catch (e) {
-        token = url.searchParams.get("token");
-      }
+      const body = await request.clone().json().catch(() => ({}));
+      token = body.token;
     } else {
       token = url.searchParams.get("token");
     }
 
     if (action === "createhost") {
-      // 只由主 Worker 内部调用，创建这个房间的 host 身份
       if (this.hostToken) return new Response(JSON.stringify({ error: "already has host" }), { status: 409 });
       const newToken = crypto.randomUUID();
       this.hostToken = newToken;
@@ -74,7 +68,6 @@ export class Room extends DurableObject {
     }
 
     if (action === "join") {
-      // client 加入（对应扫二维码）
       const newToken = crypto.randomUUID();
       this.clientTokens.add(newToken);
       return new Response(JSON.stringify({ token: newToken, role: "client" }), { headers: { "Content-Type": "application/json" } });
@@ -164,18 +157,20 @@ export class Room extends DurableObject {
   }
 }
 
-function renderHostPage(roomId, token) {
+function renderPage(roomId, token, role) {
+  const controlsHtml = role === "host"
+    ? `<input id="txt" placeholder="message"><button id="send">send</button>`
+    : ``;
   return `<!DOCTYPE html><html><body>
-<h3>Host page (URL 全程干净，无后缀无参数)</h3>
+<h3>${role === "host" ? "Host" : "Client"} page</h3>
 <div id="status">connecting...</div>
-<div id="controls"></div>
+<div id="controls">${controlsHtml}</div>
 <div id="log"></div>
 <script>
 window.__ROOM_ID__ = ${JSON.stringify(roomId)};
 window.__TOKEN__ = ${JSON.stringify(token)};
 const log = document.getElementById('log');
 const status = document.getElementById('status');
-const controls = document.getElementById('controls');
 let myConnId = null;
 
 const es = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect?token=' + encodeURIComponent(window.__TOKEN__));
@@ -184,9 +179,9 @@ es.onmessage = (e) => {
   if (data.type === 'init') {
     myConnId = data.connId;
     status.textContent = 'role: ' + data.role + ' | room: ' + window.__ROOM_ID__.slice(0,8);
-    if (data.role === 'host') {
-      controls.innerHTML = '<input id="txt" placeholder="message"><button id="send">send</button>';
-      document.getElementById('send').onclick = () => {
+    const sendBtn = document.getElementById('send');
+    if (sendBtn) {
+      sendBtn.onclick = () => {
         fetch('/_room/' + window.__ROOM_ID__ + '/command', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -205,25 +200,43 @@ es.onerror = () => { status.textContent = '[disconnected]'; };
 window.addEventListener('pagehide', () => {
   if (myConnId) navigator.sendBeacon('/_room/' + window.__ROOM_ID__ + '/leave?conn=' + myConnId);
 });
-</script></body></html>`;
+</script>
+${role === "host" ? `<hr><p>扫码加入(client):</p >< img src="/_room/${roomId}/qrcode" width="200" height="200">` : ""}
+</body></html>`;
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // 内部路由：/_room/:roomId/:action —— 用来转发给具体的 DO
     const match = url.pathname.match(/^\/_room\/([^/]+)\/(.+)$/);
     if (match) {
       const [, roomId, action] = match;
       const id = env.ROOM.idFromName(roomId);
       const stub = env.ROOM.get(id);
+
+      if (action === "qrcode") {
+        const enterUrl = `${url.origin}/_room/${roomId}/enter`;
+        const qr = qrcode(0, "M");
+        qr.addData(enterUrl);
+        qr.make();
+        const svg = qr.createSvgTag({ cellSize: 4, margin: 4 });
+        return new Response(svg, { headers: { "Content-Type": "image/svg+xml" } });
+      }
+
+      if (action === "enter") {
+        const joinResp = await stub.fetch(new Request("https://internal/join"));
+        const { token } = await joinResp.json();
+        return new Response(renderPage(roomId, token, "client"), {
+          headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" },
+        });
+      }
+
       const innerUrl = new URL(request.url);
       innerUrl.pathname = "/" + action;
       return stub.fetch(new Request(innerUrl, request));
     }
 
-    // 根路径：每次都创建全新房间，room_id/token 直接嵌进页面，不依赖 Cookie
     if (url.pathname === "/") {
       const roomId = crypto.randomUUID();
       const id = env.ROOM.idFromName(roomId);
@@ -231,7 +244,7 @@ export default {
       const resp = await stub.fetch(new Request("https://internal/createhost", { method: "POST" }));
       const { token } = await resp.json();
 
-      return new Response(renderHostPage(roomId, token), {
+      return new Response(renderPage(roomId, token, "host"), {
         headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" },
       });
     }
