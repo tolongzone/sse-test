@@ -160,18 +160,23 @@ export class Room extends DurableObject {
 function renderPage(roomId, token, role) {
   const isHost = role === "host";
   return `<!DOCTYPE html><html><body>
-<h3>${isHost ? "Host" : "Client"} page — gameState sync skeleton</h3>
+<h3>${isHost ? "Host" : "Client"} page — startGame round-trip test</h3>
 <div id="status">connecting...</div>
-${isHost ? `<div><button id="score-plus">东 加10分</button> <button id="push">推送状态</button></div>` : ``}
-<pre id="state-view">(等待状态...)</pre>
+${isHost
+  ? `<div><button id="score-plus">东 加10分</button> <button id="push">推送状态</button></div>`
+  : `<div><button id="start">开始游戏</button></div>`}
+<div id="screen-view">(等待状态...)</div>
+<pre id="state-view"></pre>
 <script>
 window.__ROOM_ID__ = ${JSON.stringify(roomId)};
 window.__TOKEN__ = ${JSON.stringify(token)};
 const status = document.getElementById('status');
+const screenView = document.getElementById('screen-view');
 const stateView = document.getElementById('state-view');
 let myConnId = null;
+let myRole = null;
 
-// 和原项目 index.html 里 init() 时的 gameState 结构保持一致（先只放骨架用得到的字段）
+// 和原项目 index.html 的 gameState 结构保持一致
 let gameState = {
   isRunning: false,
   screen: 'idle',
@@ -181,7 +186,7 @@ let gameState = {
   players: { 东:{name:'',current:0,benzhuang:0,buci:0}, 南:{name:'',current:0,benzhuang:0,buci:0}, 西:{name:'',current:0,benzhuang:0,buci:0}, 北:{name:'',current:0,benzhuang:0,buci:0} }
 };
 
-// 和原项目 pushStateToRemote() 逻辑一致：拼出完整 state payload 再广播
+// 对应原项目 pushStateToRemote()
 function pushState() {
   const state = {
     action: 'state',
@@ -199,11 +204,37 @@ function pushState() {
     state.players[dir] = { name: p.name, current: p.current, benzhuang: p.benzhuang, buci: p.buci,
       jiesuan: base + p.buci * gameState.danbu, isDealer: dir === gameState.currentDealer, isMissing: dir === gameState.missingDir };
   });
+  sendCommand(state);
+}
+
+// 对应原项目里手机/host 发送任意指令的通用出口
+function sendCommand(payload) {
   fetch('/_room/' + window.__ROOM_ID__ + '/command', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(Object.assign({}, state, { token: window.__TOKEN__ })),
+    body: JSON.stringify(Object.assign({}, payload, { token: window.__TOKEN__ })),
   });
+}
+
+// 对应原项目 handleRemoteCommand()：只有 host 会真正执行指令逻辑
+function handleRemoteCommand(data) {
+  if (data.action === 'startGame') {
+    if (!gameState.isRunning) {
+      gameState.isRunning = true;
+      gameState.screen = 'game';
+      pushState();
+    }
+    return;
+  }
+}
+
+function renderScreen(state) {
+  if (state.screen === 'idle') {
+    screenView.textContent = '等待房主开局...';
+  } else {
+    screenView.textContent = '游戏进行中';
+  }
+  stateView.textContent = JSON.stringify(state.players, null, 2);
 }
 
 const es = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect?token=' + encodeURIComponent(window.__TOKEN__));
@@ -211,10 +242,16 @@ es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.type === 'init') {
     myConnId = data.connId;
+    myRole = data.role;
     status.textContent = 'role: ' + data.role + ' | room: ' + window.__ROOM_ID__.slice(0,8);
     ${isHost ? `pushState();` : ``}
-  } else if (data.type === 'msg' && data.action === 'state') {
-    stateView.textContent = JSON.stringify(data.players, null, 2);
+  } else if (data.type === 'msg') {
+    if (data.action === 'state') {
+      renderScreen(data);
+    } else if (myRole === 'host') {
+      // 只有 host 真正执行指令；client 自己发出去的指令也会经广播回到自己，但 client 不执行，只等 state 更新
+      handleRemoteCommand(data);
+    }
   }
 };
 es.onerror = () => { status.textContent = '[disconnected]'; };
@@ -225,7 +262,11 @@ document.getElementById('score-plus').onclick = () => {
   pushState();
 };
 document.getElementById('push').onclick = pushState;
-` : ``}
+` : `
+document.getElementById('start').onclick = () => {
+  sendCommand({ action: 'startGame' });
+};
+`}
 
 window.addEventListener('pagehide', () => {
   if (myConnId) navigator.sendBeacon('/_room/' + window.__ROOM_ID__ + '/leave?conn=' + myConnId);
