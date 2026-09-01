@@ -241,6 +241,90 @@ const es = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect?token=' + 
 es.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.type === 'init') {
+function renderPage(roomId, token, role) {
+  const isHost = role === "host";
+  return `<!DOCTYPE html><html><body>
+<h3>${isHost ? "Host" : "Client"} page — startGame round-trip test</h3>
+<div id="status">connecting...</div>
+${isHost
+  ? `<div><button id="score-plus">东 加10分</button> <button id="push">推送状态</button></div>`
+  : `<div><button id="start">开始游戏</button></div>`}
+<div id="screen-view">(等待状态...)</div>
+<pre id="state-view"></pre>
+<script>
+window.__ROOM_ID__ = ${JSON.stringify(roomId)};
+window.__TOKEN__ = ${JSON.stringify(token)};
+const status = document.getElementById('status');
+const screenView = document.getElementById('screen-view');
+const stateView = document.getElementById('state-view');
+let myConnId = null;
+let myRole = null;
+
+// 和原项目 index.html 的 gameState 结构保持一致
+let gameState = {
+  isRunning: false,
+  screen: 'idle',
+  difen: 20, beilv: 1, danbu: 10,
+  initialDealer: '东', currentDealer: '东', missingDir: null,
+  roundsCount: 1, gamesCount: 0, records: [],
+  players: { 东:{name:'',current:0,benzhuang:0,buci:0}, 南:{name:'',current:0,benzhuang:0,buci:0}, 西:{name:'',current:0,benzhuang:0,buci:0}, 北:{name:'',current:0,benzhuang:0,buci:0} }
+};
+
+// 对应原项目 pushStateToRemote()
+function pushState() {
+  const state = {
+    action: 'state',
+    players: {},
+    isRunning: gameState.isRunning,
+    screen: gameState.screen,
+    qrcodeOpen: false,
+    difen: gameState.difen, beilv: gameState.beilv, danbu: gameState.danbu,
+    initialDealer: gameState.initialDealer, currentDealer: gameState.currentDealer, missingDir: gameState.missingDir,
+    gamesCount: gameState.gamesCount, roundsCount: gameState.roundsCount, records: gameState.records
+  };
+  ['东','南','西','北'].forEach(dir => {
+    const p = gameState.players[dir];
+    const base = gameState.difen > p.current ? gameState.difen + gameState.difen - p.current : gameState.difen;
+    state.players[dir] = { name: p.name, current: p.current, benzhuang: p.benzhuang, buci: p.buci,
+      jiesuan: base + p.buci * gameState.danbu, isDealer: dir === gameState.currentDealer, isMissing: dir === gameState.missingDir };
+  });
+  sendCommand(state);
+}
+
+// 对应原项目里手机/host 发送任意指令的通用出口
+function sendCommand(payload) {
+  fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({}, payload, { token: window.__TOKEN__ })),
+  });
+}
+
+// 对应原项目 handleRemoteCommand()：只有 host 会真正执行指令逻辑
+function handleRemoteCommand(data) {
+  if (data.action === 'startGame') {
+    if (!gameState.isRunning) {
+      gameState.isRunning = true;
+      gameState.screen = 'game';
+      pushState();
+    }
+    return;
+  }
+}
+
+function renderScreen(state) {
+  if (state.screen === 'idle') {
+    screenView.textContent = '等待房主开局...';
+  } else {
+    screenView.textContent = '游戏进行中';
+  }
+  stateView.textContent = JSON.stringify(state.players, null, 2);
+}
+
+const es = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect?token=' + encodeURIComponent(window.__TOKEN__));
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  if (data.type === 'init') {
     myConnId = data.connId;
     myRole = data.role;
     status.textContent = 'role: ' + data.role + ' | room: ' + window.__ROOM_ID__.slice(0,8);
