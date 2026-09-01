@@ -1,0 +1,7 @@
+{
+  "name": "sse-test",
+  "private": true,
+  "dependencies": {
+    "qrcode-generator": "^1.4.4"
+  }
+}
