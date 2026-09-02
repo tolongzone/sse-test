@@ -3,6 +3,7 @@ import qrcode from "qrcode-generator";
 
 const GRACE_MS = 15000;
 const HEARTBEAT_MS = 5000;
+const DONATE_QR_TEXT = "https://qr.alipay.com/50z11082l6pppmwuhrwc034";
 
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -183,6 +184,18 @@ async function serveWithInjectedVars(env, request, assetPath, roomId, token) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/qrcode/donate") {
+      // 固定内容，跟房间/身份无关，不需要认证
+      const qr = qrcode(0, "M");
+      qr.addData(DONATE_QR_TEXT);
+      qr.make();
+      let svg = qr.createSvgTag({ cellSize: 4, margin: 4 });
+      if (!svg.includes("xmlns=")) {
+        svg = svg.replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ');
+      }
+      return new Response(svg, { headers: { "Content-Type": "image/svg+xml" } });
+    }
 
     const match = url.pathname.match(/^\/_room\/([^/]+)\/(.+)$/);
     if (match) {
