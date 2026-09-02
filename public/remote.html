@@ -396,6 +396,49 @@ html, body {
     cursor: pointer;
 }
 .close-btn:active { filter: brightness(1.2); }
+
+/* 详细记录弹窗：内容区可滚动，侧边按钮栏固定不跟着滚动 */
+.records-modal-content {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    overflow: hidden;
+}
+.records-modal-scroll-area {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+}
+.records-side-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+}
+.side-btn {
+    border: none;
+    background: #0f3460;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    width: 44px;
+}
+.side-btn:active { filter: brightness(1.2); }
+.side-btn-close {
+    height: 44px;
+    border-radius: 8px;
+    margin-bottom: 22px;
+}
+.side-btn-up {
+    height: 56px;
+    border-radius: 8px 8px 0 0;
+}
+.side-btn-down {
+    height: 56px;
+    border-radius: 0 0 8px 8px;
+    border-top: 1px solid #1a1a2e;
+}
 .pre-start-bar {
     display: none;
     gap: 6px;
@@ -697,14 +740,16 @@ html, body {
 
 <!-- 记录弹窗 -->
 <div class="modal-overlay" id="records-modal">
-    <div class="modal-content">
-        <div class="modal-title">📝 详细记录</div>
-        <div id="records-list"></div>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-            <button class="close-btn" style="flex:1;" onclick="send('scrollRecords', 'up')">▲ 上翻</button>
-            <button class="close-btn" style="flex:1;" onclick="send('scrollRecords', 'down')">▼ 下翻</button>
+    <div class="modal-content records-modal-content">
+        <div class="records-modal-scroll-area">
+            <div class="modal-title">📝 详细记录</div>
+            <div id="records-list"></div>
         </div>
-        <button class="close-btn" onclick="closeRecords()">关闭</button>
+        <div class="records-side-rail">
+            <button class="side-btn side-btn-close" onclick="closeRecords()">✕</button>
+            <button class="side-btn side-btn-up" onclick="send('scrollRecords', 'up')">▲</button>
+            <button class="side-btn side-btn-down" onclick="send('scrollRecords', 'down')">▼</button>
+        </div>
     </div>
 </div>
 
