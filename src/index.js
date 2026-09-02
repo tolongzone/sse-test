@@ -104,15 +104,15 @@ export class Room extends DurableObject {
       });
     }
 
-if (action === "command") {
-  // 房间里任何合法成员（host 或 client）都能发指令；
-  // 是否真正生效由 host 页面自己的 handleRemoteCommand 逻辑把关，不在这里卡权限
-  if (!this.roleOf(token)) return new Response("forbidden", { status: 403 });
-  const body = await request.clone().json().catch(() => ({}));
-  const { token: _drop, ...payload } = body;
-  await this.broadcast({ type: "msg", ...payload });
-  return new Response(`sent to ${this.sessions.length} clients`);
-}
+    if (action === "command") {
+      // 房间里任何合法成员（host 或 client）都能发指令；是否真正生效
+      // 由 host 页面自己的业务逻辑把关，不在这里卡权限
+      if (!this.roleOf(token)) return new Response("forbidden", { status: 403 });
+      const body = await request.clone().json().catch(() => ({}));
+      const { token: _drop, ...payload } = body;
+      await this.broadcast({ type: "msg", ...payload });
+      return new Response(`sent to ${this.sessions.length} clients`);
+    }
 
     if (action === "leave") {
       const connId = url.searchParams.get("conn");
@@ -159,150 +159,25 @@ if (action === "command") {
   }
 }
 
-function renderPage(roomId, token, role) {
-  const isHost = role === "host";
-  return `<!DOCTYPE html><html><body>
-<h3>${isHost ? "Host" : "Client"} page — idle setup form test</h3>
-<div id="status">connecting...</div>
+// 把 room_id/token 直接注入静态页面里，页面自己的 JS 通过
+// window.__ROOM_ID__ / window.__ROOM_TOKEN__ 读取，不依赖 Cookie
+async function serveWithInjectedVars(env, request, assetPath, roomId, token) {
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = assetPath;
+  const assetResp = await env.ASSETS.fetch(new Request(assetUrl, request));
+  if (!assetResp.ok) return assetResp;
 
-${isHost ? `
-<div id="setup-form">
-  <h4>设置</h4>
-  东: <input id="name-东" value=""> 南: <input id="name-南" value=""><br>
-  西: <input id="name-西" value=""> 北: <input id="name-北" value=""><br>
-  底分: <input id="set-difen" type="number" value="20">
-  倍率: <input id="set-beilv" type="number" value="1">
-  单补: <input id="set-danbu" type="number" value="10"><br>
-  庄家:
-  <label><input type="radio" name="dealer" value="东" checked> 东</label>
-  <label><input type="radio" name="dealer" value="南"> 南</label>
-  <label><input type="radio" name="dealer" value="西"> 西</label>
-  <label><input type="radio" name="dealer" value="北"> 北</label><br>
-  <button id="start-btn">开始游戏</button>
-</div>
-` : `<div><button id="start">开始游戏(client 触发)</button></div>`}
+  let html = await assetResp.text();
+  const inject =
+    "<script>" +
+    "window.__ROOM_ID__=" + JSON.stringify(roomId) + ";" +
+    "window.__ROOM_TOKEN__=" + JSON.stringify(token) + ";" +
+    "</script>";
+  html = html.replace("</head>", inject + "</head>");
 
-<div id="screen-view">(等待状态...)</div>
-<pre id="state-view"></pre>
-<script>
-window.__ROOM_ID__ = ${JSON.stringify(roomId)};
-window.__TOKEN__ = ${JSON.stringify(token)};
-const status = document.getElementById('status');
-const screenView = document.getElementById('screen-view');
-const stateView = document.getElementById('state-view');
-let myConnId = null;
-let myRole = null;
-
-let gameState = {
-  isRunning: false,
-  screen: 'idle',
-  difen: 20, beilv: 1, danbu: 10,
-  initialDealer: '东', currentDealer: '东', missingDir: null,
-  roundsCount: 1, gamesCount: 0, records: [],
-  players: { 东:{name:'',current:0,benzhuang:0,buci:0}, 南:{name:'',current:0,benzhuang:0,buci:0}, 西:{name:'',current:0,benzhuang:0,buci:0}, 北:{name:'',current:0,benzhuang:0,buci:0} }
-};
-
-function pushState() {
-  const state = {
-    action: 'state',
-    players: {},
-    isRunning: gameState.isRunning,
-    screen: gameState.screen,
-    qrcodeOpen: false,
-    difen: gameState.difen, beilv: gameState.beilv, danbu: gameState.danbu,
-    initialDealer: gameState.initialDealer, currentDealer: gameState.currentDealer, missingDir: gameState.missingDir,
-    gamesCount: gameState.gamesCount, roundsCount: gameState.roundsCount, records: gameState.records
-  };
-  ['东','南','西','北'].forEach(dir => {
-    const p = gameState.players[dir];
-    const base = gameState.difen > p.current ? gameState.difen + gameState.difen - p.current : gameState.difen;
-    state.players[dir] = { name: p.name, current: p.current, benzhuang: p.benzhuang, buci: p.buci,
-      jiesuan: base + p.buci * gameState.danbu, isDealer: dir === gameState.currentDealer, isMissing: dir === gameState.missingDir };
+  return new Response(html, {
+    headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" },
   });
-  sendCommand(state);
-}
-
-function sendCommand(payload) {
-  fetch('/_room/' + window.__ROOM_ID__ + '/command', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(Object.assign({}, payload, { token: window.__TOKEN__ })),
-  });
-}
-
-// 对应原项目 toggleGame() 里从表单读取设置这部分
-function collectSettingsFromForm() {
-  ['东','南','西','北'].forEach(dir => {
-    gameState.players[dir].name = document.getElementById('name-' + dir).value;
-  });
-  gameState.difen = Number(document.getElementById('set-difen').value) || 20;
-  gameState.beilv = Number(document.getElementById('set-beilv').value) || 1;
-  gameState.danbu = Number(document.getElementById('set-danbu').value) || 10;
-  const dealerInput = document.querySelector('input[name="dealer"]:checked');
-  const dealer = dealerInput ? dealerInput.value : '东';
-  gameState.initialDealer = dealer;
-  gameState.currentDealer = dealer;
-}
-
-function handleRemoteCommand(data) {
-  if (data.action === 'startGame') {
-    if (!gameState.isRunning) {
-      collectSettingsFromForm();
-      gameState.isRunning = true;
-      gameState.screen = 'game';
-      pushState();
-    }
-    return;
-  }
-}
-
-function renderScreen(state) {
-  if (state.screen === 'idle') {
-    screenView.textContent = '等待房主开局...';
-  } else {
-    screenView.textContent = '游戏进行中';
-  }
-  stateView.textContent = JSON.stringify(state.players, null, 2);
-}
-
-const es = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect?token=' + encodeURIComponent(window.__TOKEN__));
-es.onmessage = (e) => {
-  const data = JSON.parse(e.data);
-  if (data.type === 'init') {
-    myConnId = data.connId;
-    myRole = data.role;
-    status.textContent = 'role: ' + data.role + ' | room: ' + window.__ROOM_ID__.slice(0,8);
-  } else if (data.type === 'msg') {
-    if (data.action === 'state') {
-      renderScreen(data);
-    } else if (myRole === 'host') {
-      handleRemoteCommand(data);
-    }
-  }
-};
-es.onerror = () => { status.textContent = '[disconnected]'; };
-
-${isHost ? `
-document.getElementById('start-btn').onclick = () => {
-  if (!gameState.isRunning) {
-    collectSettingsFromForm();
-    gameState.isRunning = true;
-    gameState.screen = 'game';
-    pushState();
-  }
-};
-` : `
-document.getElementById('start').onclick = () => {
-  sendCommand({ action: 'startGame' });
-};
-`}
-
-window.addEventListener('pagehide', () => {
-  if (myConnId) navigator.sendBeacon('/_room/' + window.__ROOM_ID__ + '/leave?conn=' + myConnId);
-});
-</script>
-${isHost ? `<hr><p>扫码加入(client):</p><img src="/_room/${roomId}/qrcode" width="200" height="200">` : ""}
-</body></html>`;
 }
 
 export default {
@@ -330,11 +205,10 @@ export default {
       if (action === "enter") {
         const joinResp = await stub.fetch(new Request("https://internal/join"));
         const { token } = await joinResp.json();
-        return new Response(renderPage(roomId, token, "client"), {
-          headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" },
-        });
+        return serveWithInjectedVars(env, request, "/remote.html", roomId, token);
       }
 
+      // connect / command / leave 直接转发给 DO，不用先经过静态资源层
       const innerUrl = new URL(request.url);
       innerUrl.pathname = "/" + action;
       return stub.fetch(new Request(innerUrl, request));
@@ -347,11 +221,10 @@ export default {
       const resp = await stub.fetch(new Request("https://internal/createhost", { method: "POST" }));
       const { token } = await resp.json();
 
-      return new Response(renderPage(roomId, token, "host"), {
-        headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" },
-      });
+      return serveWithInjectedVars(env, request, "/index.html", roomId, token);
     }
 
-    return new Response("not found", { status: 404 });
+    // 其余路径（如果有）交给静态资源层兜底（比如以后加图标之类）
+    return env.ASSETS.fetch(request);
   },
 };
