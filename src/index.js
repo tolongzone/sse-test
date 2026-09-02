@@ -162,11 +162,26 @@ if (action === "command") {
 function renderPage(roomId, token, role) {
   const isHost = role === "host";
   return `<!DOCTYPE html><html><body>
-<h3>${isHost ? "Host" : "Client"} page — startGame round-trip test</h3>
+<h3>${isHost ? "Host" : "Client"} page — idle setup form test</h3>
 <div id="status">connecting...</div>
-${isHost
-  ? `<div><button id="score-plus">东 加10分</button> <button id="push">推送状态</button></div>`
-  : `<div><button id="start">开始游戏</button></div>`}
+
+${isHost ? `
+<div id="setup-form">
+  <h4>设置</h4>
+  东: <input id="name-东" value=""> 南: <input id="name-南" value=""><br>
+  西: <input id="name-西" value=""> 北: <input id="name-北" value=""><br>
+  底分: <input id="set-difen" type="number" value="20">
+  倍率: <input id="set-beilv" type="number" value="1">
+  单补: <input id="set-danbu" type="number" value="10"><br>
+  庄家:
+  <label><input type="radio" name="dealer" value="东" checked> 东</label>
+  <label><input type="radio" name="dealer" value="南"> 南</label>
+  <label><input type="radio" name="dealer" value="西"> 西</label>
+  <label><input type="radio" name="dealer" value="北"> 北</label><br>
+  <button id="start-btn">开始游戏</button>
+</div>
+` : `<div><button id="start">开始游戏(client 触发)</button></div>`}
+
 <div id="screen-view">(等待状态...)</div>
 <pre id="state-view"></pre>
 <script>
@@ -215,9 +230,24 @@ function sendCommand(payload) {
   });
 }
 
+// 对应原项目 toggleGame() 里从表单读取设置这部分
+function collectSettingsFromForm() {
+  ['东','南','西','北'].forEach(dir => {
+    gameState.players[dir].name = document.getElementById('name-' + dir).value;
+  });
+  gameState.difen = Number(document.getElementById('set-difen').value) || 20;
+  gameState.beilv = Number(document.getElementById('set-beilv').value) || 1;
+  gameState.danbu = Number(document.getElementById('set-danbu').value) || 10;
+  const dealerInput = document.querySelector('input[name="dealer"]:checked');
+  const dealer = dealerInput ? dealerInput.value : '东';
+  gameState.initialDealer = dealer;
+  gameState.currentDealer = dealer;
+}
+
 function handleRemoteCommand(data) {
   if (data.action === 'startGame') {
     if (!gameState.isRunning) {
+      collectSettingsFromForm();
       gameState.isRunning = true;
       gameState.screen = 'game';
       pushState();
@@ -242,7 +272,6 @@ es.onmessage = (e) => {
     myConnId = data.connId;
     myRole = data.role;
     status.textContent = 'role: ' + data.role + ' | room: ' + window.__ROOM_ID__.slice(0,8);
-    ${isHost ? `pushState();` : ``}
   } else if (data.type === 'msg') {
     if (data.action === 'state') {
       renderScreen(data);
@@ -254,11 +283,14 @@ es.onmessage = (e) => {
 es.onerror = () => { status.textContent = '[disconnected]'; };
 
 ${isHost ? `
-document.getElementById('score-plus').onclick = () => {
-  gameState.players['东'].current += 10;
-  pushState();
+document.getElementById('start-btn').onclick = () => {
+  if (!gameState.isRunning) {
+    collectSettingsFromForm();
+    gameState.isRunning = true;
+    gameState.screen = 'game';
+    pushState();
+  }
 };
-document.getElementById('push').onclick = pushState;
 ` : `
 document.getElementById('start').onclick = () => {
   sendCommand({ action: 'startGame' });
