@@ -104,13 +104,15 @@ export class Room extends DurableObject {
       });
     }
 
-    if (action === "command") {
-      if (!token || token !== this.hostToken) return new Response("forbidden", { status: 403 });
-      const body = await request.clone().json().catch(() => ({}));
-      const { token: _drop, ...payload } = body;
-      await this.broadcast({ type: "msg", ...payload });
-      return new Response(`sent to ${this.sessions.length} clients`);
-    }
+if (action === "command") {
+  // 房间里任何合法成员（host 或 client）都能发指令；
+  // 是否真正生效由 host 页面自己的 handleRemoteCommand 逻辑把关，不在这里卡权限
+  if (!this.roleOf(token)) return new Response("forbidden", { status: 403 });
+  const body = await request.clone().json().catch(() => ({}));
+  const { token: _drop, ...payload } = body;
+  await this.broadcast({ type: "msg", ...payload });
+  return new Response(`sent to ${this.sessions.length} clients`);
+}
 
     if (action === "leave") {
       const connId = url.searchParams.get("conn");
