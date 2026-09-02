@@ -111,8 +111,10 @@ export class Room extends DurableObject {
       if (!this.roleOf(token)) return new Response("forbidden", { status: 403 });
       const body = await request.clone().json().catch(() => ({}));
       const { token: _drop, ...payload } = body;
-      await this.broadcast({ type: "msg", ...payload });
-      return new Response(`sent to ${this.sessions.length} clients`);
+      // 广播放到后台执行，不让发指令的这一方等所有连接都写完才拿到响应——
+      // 否则任何一条网络较慢的连接都会拖慢每一次操作的手感
+      this.ctx.waitUntil(this.broadcast({ type: "msg", ...payload }));
+      return new Response("ok");
     }
 
     if (action === "leave") {
