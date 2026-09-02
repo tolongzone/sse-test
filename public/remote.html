@@ -700,6 +700,10 @@ html, body {
     <div class="modal-content">
         <div class="modal-title">📝 详细记录</div>
         <div id="records-list"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+            <button class="close-btn" style="flex:1;" onclick="send('scrollRecords', 'up')">▲ 上翻</button>
+            <button class="close-btn" style="flex:1;" onclick="send('scrollRecords', 'down')">▼ 下翻</button>
+        </div>
         <button class="close-btn" onclick="closeRecords()">关闭</button>
     </div>
 </div>

@@ -1787,6 +1787,15 @@ function handleRemoteCommand(data) {
         pushStateToRemote();
         return;
     }
+    if (action === 'scrollRecords') {
+        // 遥控端翻页按钮：只控制 host 自己的滚动位置，不用同步回手机显示
+        const list = document.getElementById('records-modal-list');
+        if (list) {
+            const dir = target === 'up' ? -1 : 1;
+            list.scrollBy({ top: dir * list.clientHeight * 0.8, behavior: 'smooth' });
+        }
+        return;
+    }
     if (action === 'toggleRecords') {
         const modal = document.getElementById('records-modal');
         if (modal.classList.contains('show')) {
