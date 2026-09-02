@@ -1,1 +1,2205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>麻将记分器</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .game-container {
+            display: grid;
+            grid-template-columns: 320px 320px 320px;
+            grid-template-rows: 180px 180px 180px;
+            gap: 4px;
+            transform-origin: center center;
+        }
+        .block {
+            width: 320px;
+            height: 180px;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            overflow: hidden;
+        }
+        .player-display {
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .player-display.disabled {
+            background: #2a2a3e;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .player-display.negative-score {
+            background: #3a1a1a;
+            border-color: #e94560;
+            animation: redPulse 1.5s ease-in-out infinite;
+        }
+        @keyframes redPulse {
+            0%, 100% { border-color: #e94560; box-shadow: 0 0 5px rgba(233, 69, 96, 0.3); }
+            50% { border-color: #ff6b6b; box-shadow: 0 0 20px rgba(233, 69, 96, 0.6); }
+        }
+        .pd-row1 {
+            height: 50px;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+        }
+        .pd-position {
+            font-size: 20px;
+            font-weight: bold;
+            color: #e94560;
+            width: 40px;
+            padding-left: 12px;
+            box-sizing: border-box;
+        }
+        .pd-name {
+            flex: 1;
+            text-align: left;
+            padding-left: 8px;
+        }
+        .pd-name-input {
+            width: 140px;
+            text-align: left;
+            background: transparent;
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            color: #4ecca3;
+            font-size: 18px;
+            padding: 3px 6px;
+        }
+        .pd-name-input:focus { outline: none; border-color: #e94560; }
+        .pd-dealer {
+            width: 40px;
+            height: 36px;
+            background: #e94560;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 2px 6px rgba(233, 69, 96, 0.4);
+        }
+        .pd-dealer.hidden { display: none; }
+        .pd-row2 {
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 12px;
+            position: relative;
+        }
+        .pd-benzhuang-area {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .pd-benzhuang-area.show { opacity: 1; pointer-events: auto; }
+        .pd-benzhuang-label { font-size: 12px; color: #a0a0a0; }
+        .pd-benzhuang-val { font-size: 18px; font-weight: bold; color: #f39c12; }
+        .pd-score-area {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+        }
+        .current-score {
+            font-size: 52px;
+            font-weight: bold;
+            color: #ffd700;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+        }
+        .pd-row3 {
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px;
+        }
+        .pd-stat-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            width: 40px;
+        }
+        .pd-stat-label { font-size: 12px; color: #a0a0a0; }
+        .pd-stat-val { font-size: 18px; font-weight: bold; color: #4ecca3; }
+        .center-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            height: 100%;
+        }
+        .control-row-top { display: flex; gap: 12px; justify-content: center; }
+        .control-row-bottom { display: flex; gap: 14px; justify-content: center; }
+        .tile-btn {
+            width: 64px;
+            height: 96px;
+            border: none;
+            border-radius: 8px;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: white;
+            user-select: none;
+            touch-action: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            line-height: 1.2;
+        }
+        .tile-btn:hover { transform: scale(1.05); filter: brightness(1.2); }
+        .tile-btn:active { transform: scale(0.95); }
+        .tile-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .tile-btn .sub { font-size: 12px; font-weight: normal; opacity: 0.9; }
+        .tile-btn.selected {
+            box-shadow: 0 0 0 3px #fff, 0 0 15px rgba(255,255,255,0.5);
+            transform: scale(1.08);
+        }
+        .btn-p { background: #27ae60; }
+        .btn-cd { background: #2980b9; }
+        .btn-cand { background: #8e44ad; }
+        .btn-110 { background: #e67e22; }
+        .flat-btn {
+            width: 88px;
+            height: 48px;
+            border: none;
+            border-radius: 8px;
+            font-size: 22px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: white;
+            user-select: none;
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .flat-btn:hover { filter: brightness(1.2); }
+        .flat-btn:active { transform: scale(0.95); }
+        .flat-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .flat-btn.selected {
+            box-shadow: 0 0 0 3px #fff, 0 0 15px rgba(255,255,255,0.5);
+            transform: scale(1.08);
+        }
+        .btn-plus { background: #E6CC80; }
+        .btn-minus { background: #ffffff; color: #1a1a2e; }
+        .btn-undo { background: #6c757d; }
+        .game-over-img {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .game-over-img img {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 6px;
+            object-fit: contain;
+        }
+        .donate-qr-frame {
+            background: rgb(56,118,246);
+            border-radius: 10px;
+            padding: 12px 12px 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            box-sizing: border-box;
+            max-width: 90%;
+            max-height: 90%;
+        }
+        .donate-qr-frame .donate-qr-img {
+            width: 160px;
+            height: 160px;
+            background: white;
+            border-radius: 6px;
+            padding: 6px;
+            box-sizing: border-box;
+            object-fit: contain;
+            max-width: none;
+            max-height: none;
+        }
+        .donate-qr-frame .donate-qr-caption {
+            color: white;
+            font-size: 12px;
+            line-height: 1.4;
+            text-align: center;
+            width: 160px;
+        }
+        /* 结束界面那个位置本身是个400x400的正方形，让蓝色底框把它填满，
+           四边留白宽度一致，宽度刚好够放下底部这一行文字 */
+        .end-center .donate-qr-frame {
+            display: block;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            max-height: none;
+            box-sizing: border-box;
+            padding: 32px;
+        }
+        .end-center .donate-qr-frame .donate-qr-img {
+            width: 100%;
+            height: 100%;
+            padding: 0;
+        }
+        .end-center .donate-qr-frame .donate-qr-caption {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: auto;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
+        }
+        .corner-area {
+            padding: 8px 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .corner-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #e94560;
+            text-align: center;
+            padding-bottom: 4px;
+            flex-shrink: 0;
+        }
+        .corner-tl .corner-title { height: 30px; line-height: 26px; padding: 0; }
+        .settings-row {
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 0 15px;
+        }
+        .setting-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            justify-content: space-between;
+            max-width: 100px;
+        }
+        .setting-label { font-size: 16px; color: #a0a0a0; white-space: nowrap; }
+        .setting-input {
+            width: 52px;
+            text-align: center;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            color: #4ecca3;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 4px;
+        }
+        .setting-input:focus { outline: none; border-color: #e94560; }
+        .setting-input:disabled { opacity: 0.5; }
+        .dealer-select {
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 0 15px;
+            font-size: 16px;
+        }
+        .dealer-select label {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            cursor: pointer;
+        }
+        .dealer-select input[type="radio"] { width: 16px; height: 16px; }
+        .start-btn-wrap {
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 15px;
+        }
+        .start-btn {
+            width: 140px;
+            height: 40px;
+            border: none;
+            border-radius: 6px;
+            background: #e94560;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .start-btn:hover { filter: brightness(1.2); }
+        .start-btn.active { background: #c0392b; }
+        .corner-tr .corner-title { height: 30px; line-height: 26px; padding: 0; }
+        .op-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 4px 8px;
+            height: calc(100% - 30px);
+        }
+        .op-row {
+            display: flex;
+            gap: 4px;
+            flex: 1;
+        }
+        .op-row-top, .op-row-bottom {
+            justify-content: center;
+        }
+        .op-row-top .op-grid-btn, .op-row-bottom .op-grid-btn {
+            flex: 1;
+        }
+        .op-row-wind .op-grid-btn {
+            flex: 1;
+        }
+        .op-grid-btn {
+            border: none;
+            border-radius: 6px;
+            background: #0f3460;
+            color: #e0e0e0;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+            touch-action: none;
+            width: 100%;
+            height: 100%;
+        }
+        .op-grid-btn:hover { background: #1a4a7a; }
+        .op-grid-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .op-grid-btn.selected {
+            box-shadow: 0 0 0 2px #fff, 0 0 10px rgba(255,255,255,0.5);
+            transform: scale(1.05);
+        }
+        .op-grid-btn.drag-target {
+            box-shadow: 0 0 0 2px #e94560, 0 0 15px rgba(233, 69, 96, 0.4);
+            transform: scale(1.05);
+        }
+        .op-grid-btn.click-target {
+            box-shadow: 0 0 0 2px #4ecca3, 0 0 10px rgba(78, 204, 163, 0.4);
+            transform: scale(1.05);
+        }
+        .corner-bl .corner-title { height: 30px; line-height: 26px; padding: 0; }
+        .stat-item {
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+            font-size: 16px;
+        }
+        .stat-item .label { color: #a0a0a0; }
+        .stat-item .value { color: #4ecca3; font-weight: bold; font-size: 18px; }
+        .corner-br .corner-title { height: 30px; line-height: 26px; padding: 0; }
+        .records-scroll {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .record-card {
+            background: #0f3460;
+            border-radius: 4px;
+            padding: 3px 5px;
+            font-size: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+            align-items: center;
+        }
+        .record-part {
+            padding: 1px 4px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+        .part-id { background: #e94560; color: white; }
+        .part-type { background: #8e44ad; color: white; }
+        .part-player { background: #f39c12; color: #1a1a2e; font-weight: bold; }
+        .part-dealer { background: #8e44ad; color: white; font-weight: bold; }
+        .part-score-pos { background: #e94560; color: white; font-weight: bold; }
+        .part-score-neg { background: #27ae60; color: white; font-weight: bold; }
+        .part-score-zero { background: #555; color: #ccc; font-weight: bold; }
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-content {
+            background: #16213e;
+            border-radius: 16px;
+            padding: 20px;
+            width: 360px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 2px solid #0f3460;
+        }
+        .modal-title {
+            font-size: 18px;
+            color: #e94560;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .form-group { margin-bottom: 12px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            color: #a0a0a0;
+            font-size: 13px;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #e94560;
+        }
+        .modal-btns {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        .modal-btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .modal-btn.confirm { background: #e94560; color: white; }
+        .modal-btn.cancel { background: #0f3460; color: #e0e0e0; }
+        .drag-hint {
+            position: fixed;
+            pointer-events: none;
+            z-index: 999;
+            background: #e94560;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            font-size: 14px;
+        }
+        .drag-hint.show { display: block; }
+        .player-display.drag-target {
+            border-color: #e94560;
+            box-shadow: 0 0 20px rgba(233, 69, 96, 0.3);
+        }
+        .player-display.click-target {
+            border-color: #4ecca3;
+            box-shadow: 0 0 20px rgba(78, 204, 163, 0.4);
+        }
+        .end-container {
+            display: none;
+            grid-template-columns: 70px 400px 70px;
+            grid-template-rows: 70px 400px 70px;
+            gap: 4px;
+            transform-origin: center center;
+        }
+        .end-container.show { display: grid; }
+        .end-block {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .end-top, .end-bottom {
+            width: 400px;
+            height: 70px;
+            padding: 0 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 20px;
+        }
+        .end-left, .end-right {
+            width: 70px;
+            height: 400px;
+            padding: 10px 5px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 16px;
+            text-align: center;
+        }
+        .end-center { width: 400px; height: 400px; }
+        .end-center img { width: 100%; height: 100%; object-fit: contain; }
+        .end-corner {
+            width: 70px;
+            height: 70px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .end-corner:hover { filter: brightness(1.3); }
+        .end-corner img { width: 100%; height: 100%; object-fit: contain; }
+        .end-btn-icon {
+            width: 70px;
+            height: 70px;
+            background: #6c757d;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            font-weight: bold;
+            font-family: 'Noto Serif SC', 'SimSun', 'STSong', 'serif';
+            color: white;
+        }
+        .end-btn-restart { background: #f1c40f; }
+        .end-stat-label { color: #a0a0a0; font-size: 14px; font-weight: bold; }
+        .end-stat-val { color: #4ecca3; font-weight: bold; font-size: 20px; }
+        .end-stat-dir { color: #e94560; font-weight: bold; font-size: 22px; }
+        .end-stat-name { color: #4ecca3; font-weight: bold; font-size: 20px; }
+        .end-stat-current { color: #f39c12; font-weight: bold; font-size: 22px; }
+        .end-stat-jiesuan { color: #ffd700; font-weight: bold; font-size: 26px; text-shadow: 0 0 10px rgba(255, 215, 0, 0.6); }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-track { background: #1a1a2e; }
+        ::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 2px; }
+        .god-player-block { background: #0f3460; padding: 8px; border-radius: 6px; margin-bottom: 6px; }
+        .god-player-title { color: #e94560; font-weight: bold; margin-bottom: 6px; font-size: 14px; }
+        .god-player-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+        .god-player-grid label { font-size: 11px; color: #a0a0a0; display: block; margin-bottom: 2px; }
+        .god-player-grid input { width: 100%; box-sizing: border-box; }
+        .expand-btn {
+            cursor: pointer;
+            font-size: 14px;
+            opacity: 0.6;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .expand-btn:hover { opacity: 1; transform: scale(1.2); }
 
+        .records-modal-content {
+            width: 90vw;
+            max-width: 900px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .records-modal-scroll {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 10px;
+            padding-right: 4px;
+        }
+        .records-modal-scroll .record-card {
+            font-size: 14px;
+            padding: 6px 10px;
+        }
+        .records-modal-scroll .record-part {
+            padding: 2px 6px;
+            font-size: 13px;
+        }
+    </style>
+<base target="_blank">
+</head>
+<body>
+    <div class="game-container" id="game-container">
+        <div class="block corner-area corner-tl">
+            <div class="corner-title">⚙️ 设置</div>
+            <div class="settings-row">
+                <div class="setting-item">
+                    <span class="setting-label">底分</span>
+                    <input type="number" class="setting-input" id="set-difen" value="20" min="0" step="1">
+                </div>
+                <div class="setting-item">
+                    <span class="setting-label">倍率</span>
+                    <input type="number" class="setting-input" id="set-beilv" value="1" min="1" step="1">
+                </div>
+                <div class="setting-item">
+                    <span class="setting-label">单补</span>
+                    <input type="number" class="setting-input" id="set-danbu" value="10" min="1" step="1">
+                </div>
+            </div>
+            <div class="dealer-select">
+                <span style="color:#a0a0a0;">定庄</span>
+                <label><input type="radio" name="dealer" value="东" checked onchange="changeDealer(this.value)"> 东</label>
+                <label><input type="radio" name="dealer" value="南" onchange="changeDealer(this.value)"> 南</label>
+                <label><input type="radio" name="dealer" value="西" onchange="changeDealer(this.value)"> 西</label>
+                <label><input type="radio" name="dealer" value="北" onchange="changeDealer(this.value)"> 北</label>
+            </div>
+            <div class="start-btn-wrap">
+                <button class="start-btn" id="btn-start" onclick="toggleGame()">搞起</button>
+            </div>
+        </div>
+        <div class="block player-display" id="player-top" data-dir="北">
+            <div class="pd-row1">
+                <span class="pd-position">北</span>
+                <div class="pd-name">
+                    <input type="text" class="pd-name-input" id="name-input-top" value="" placeholder="-" onchange="updateNameByPos('top', this.value)">
+                </div>
+                <span class="pd-dealer hidden" id="dealer-top">庄</span>
+            </div>
+            <div class="pd-row2">
+                <div class="pd-benzhuang-area" id="benzhuang-wrap-top">
+                    <span class="pd-benzhuang-label">本局</span>
+                    <span class="pd-benzhuang-val" id="benzhuang-top">0</span>
+                </div>
+                <div class="pd-score-area">
+                    <span class="current-score" id="score-top">0</span>
+                </div>
+            </div>
+            <div class="pd-row3">
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">补次</span>
+                    <span class="pd-stat-val" id="buci-top">0</span>
+                </div>
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">结算</span>
+                    <span class="pd-stat-val" id="jiesuan-top">0</span>
+                </div>
+            </div>
+        </div>
+        <div class="block corner-area corner-tr">
+            <div class="corner-title">🎮 操作 <span class="expand-btn" onclick="sendCommand('toggleQrcode')" title="手机遥控">📱</span></div>
+            <div class="op-grid">
+                <div class="op-row op-row-top">
+                    <button class="op-grid-btn drag-btn" id="btn-top" data-type="top" disabled>在上</button>
+                    <button class="op-grid-btn drag-btn" id="btn-dealer" data-type="dealer" disabled>调庄</button>
+                </div>
+                <div class="op-row op-row-wind">
+                    <button class="op-grid-btn drag-btn op-wind" id="btn-east" data-type="wind" data-wind="东" disabled>东</button>
+                    <button class="op-grid-btn drag-btn op-wind" id="btn-south" data-type="wind" data-wind="南" disabled>南</button>
+                    <button class="op-grid-btn drag-btn op-wind" id="btn-west" data-type="wind" data-wind="西" disabled>西</button>
+                    <button class="op-grid-btn drag-btn op-wind" id="btn-north" data-type="wind" data-wind="北" disabled>北</button>
+                </div>
+                <div class="op-row op-row-bottom">
+                    <button class="op-grid-btn drag-btn" id="btn-missing2" data-type="missing" disabled>三缺一</button>
+                </div>
+            </div>
+        </div>
+        <div class="block player-display" id="player-left" data-dir="西">
+            <div class="pd-row1">
+                <span class="pd-position">西</span>
+                <div class="pd-name">
+                    <input type="text" class="pd-name-input" id="name-input-left" value="" placeholder="-" onchange="updateNameByPos('left', this.value)">
+                </div>
+                <span class="pd-dealer hidden" id="dealer-left">庄</span>
+            </div>
+            <div class="pd-row2">
+                <div class="pd-benzhuang-area" id="benzhuang-wrap-left">
+                    <span class="pd-benzhuang-label">本局</span>
+                    <span class="pd-benzhuang-val" id="benzhuang-left">0</span>
+                </div>
+                <div class="pd-score-area">
+                    <span class="current-score" id="score-left">0</span>
+                </div>
+            </div>
+            <div class="pd-row3">
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">补次</span>
+                    <span class="pd-stat-val" id="buci-left">0</span>
+                </div>
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">结算</span>
+                    <span class="pd-stat-val" id="jiesuan-left">0</span>
+                </div>
+            </div>
+        </div>
+        <div class="block player-display center" id="player-center">
+            <div class="center-controls" id="controls-active">
+                <div class="control-row-top">
+                    <button class="tile-btn btn-p drag-btn" id="btn-p" data-type="P" disabled>P<span class="sub">×1</span></button>
+                    <button class="tile-btn btn-cd drag-btn" id="btn-cd" data-type="Ci" disabled>Ci<span class="sub">×2</span></button>
+                    <button class="tile-btn btn-cand drag-btn" id="btn-cand" data-type="DiorC" disabled>DiorC<span class="sub">×4</span></button>
+                    <button class="tile-btn btn-110 drag-btn" id="btn-110" data-type="110" disabled>110<span class="sub">×8</span></button>
+                </div>
+                <div class="control-row-bottom">
+                    <button class="flat-btn btn-plus drag-btn" id="btn-plus" data-type="+" disabled>+</button>
+                    <button class="flat-btn btn-undo" id="btn-undo" onclick="undoLast()" disabled>↩</button>
+                    <button class="flat-btn btn-minus drag-btn" id="btn-minus" data-type="-" disabled>-</button>
+                </div>
+            </div>
+            <div class="game-over-img" id="controls-inactive" style="display:none">
+<div class="donate-qr-frame">
+    <img class="donate-qr-img" src="/api/qrcode/donate" alt="赞赏码">
+    <div class="donate-qr-caption">扫一扫向支付宝小荷包「六人黑」转账</div>
+</div>
+</div>
+        </div>
+        <div class="block player-display" id="player-right" data-dir="东">
+            <div class="pd-row1">
+                <span class="pd-position">东</span>
+                <div class="pd-name">
+                    <input type="text" class="pd-name-input" id="name-input-right" value="" placeholder="-" onchange="updateNameByPos('right', this.value)">
+                </div>
+                <span class="pd-dealer hidden" id="dealer-right">庄</span>
+            </div>
+            <div class="pd-row2">
+                <div class="pd-benzhuang-area" id="benzhuang-wrap-right">
+                    <span class="pd-benzhuang-label">本局</span>
+                    <span class="pd-benzhuang-val" id="benzhuang-right">0</span>
+                </div>
+                <div class="pd-score-area">
+                    <span class="current-score" id="score-right">0</span>
+                </div>
+            </div>
+            <div class="pd-row3">
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">补次</span>
+                    <span class="pd-stat-val" id="buci-right">0</span>
+                </div>
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">结算</span>
+                    <span class="pd-stat-val" id="jiesuan-right">0</span>
+                </div>
+            </div>
+        </div>
+        <div class="block corner-area corner-bl">
+            <div class="corner-title">📊 统计</div>
+            <div class="stat-item">
+                <span class="label">时长</span>
+                <span class="value" id="stat-time">00:00</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">圈数</span>
+                <span class="value" id="stat-rounds">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">局数</span>
+                <span class="value" id="stat-games">0</span>
+            </div>
+        </div>
+        <div class="block player-display" id="player-bottom" data-dir="南">
+            <div class="pd-row1">
+                <span class="pd-position">南</span>
+                <div class="pd-name">
+                    <input type="text" class="pd-name-input" id="name-input-bottom" value="" placeholder="-" onchange="updateNameByPos('bottom', this.value)">
+                </div>
+                <span class="pd-dealer hidden" id="dealer-bottom">庄</span>
+            </div>
+            <div class="pd-row2">
+                <div class="pd-benzhuang-area" id="benzhuang-wrap-bottom">
+                    <span class="pd-benzhuang-label">本局</span>
+                    <span class="pd-benzhuang-val" id="benzhuang-bottom">0</span>
+                </div>
+                <div class="pd-score-area">
+                    <span class="current-score" id="score-bottom">0</span>
+                </div>
+            </div>
+            <div class="pd-row3">
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">补次</span>
+                    <span class="pd-stat-val" id="buci-bottom">0</span>
+                </div>
+                <div class="pd-stat-col">
+                    <span class="pd-stat-label">结算</span>
+                    <span class="pd-stat-val" id="jiesuan-bottom">0</span>
+                </div>
+            </div>
+        </div>
+        <div class="block corner-area corner-br">
+            <div class="corner-title" style="display:flex;align-items:center;justify-content:center;gap:8px;">📝 详细记录 <span class="expand-btn" onclick="sendCommand('toggleRecords')" title="展开查看">⛶</span></div>
+            <div class="records-scroll" id="records-list"></div>
+        </div>
+    </div>
+    <div class="end-container" id="end-container">
+        <div class="end-block end-corner" onclick="returnToGame()">
+            <div class="end-btn-icon end-btn-back">↩</div>
+        </div>
+        <div class="end-block end-top" id="end-top"></div>
+        <div class="end-block end-corner" onclick="restartGame()">
+            <div class="end-btn-icon end-btn-restart" style="font-size:22px;">⟲</div>
+        </div>
+        <div class="end-block end-left" id="end-left"></div>
+        <div class="end-block end-center">
+<div class="donate-qr-frame">
+    <img class="donate-qr-img" src="/api/qrcode/donate" alt="赞赏码">
+    <div class="donate-qr-caption">扫一扫向支付宝小荷包「六人黑」转账</div>
+</div>
+</div>
+        <div class="end-block end-right" id="end-right"></div>
+        <div class="end-block end-corner">
+            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='70' height='70'%3E%3Crect width='70' height='70' fill='%23c0392b' rx='8'/%3E%3Ctext x='35' y='45' text-anchor='middle' fill='white' font-size='32' font-weight='bold' font-family='serif'%3E中%3C/text%3E%3C/svg%3E" alt="红中">
+        </div>
+        <div class="end-block end-bottom" id="end-bottom"></div>
+        <div class="end-block end-corner">
+            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='70' height='70'%3E%3Crect width='70' height='70' fill='%2327ae60' rx='8'/%3E%3Ctext x='35' y='45' text-anchor='middle' fill='white' font-size='32' font-weight='bold' font-family='serif'%3E發%3C/text%3E%3C/svg%3E" alt="发财">
+        </div>
+    </div>
+    <div class="drag-hint" id="drag-hint"></div>
+
+    
+    <div class="modal-overlay" id="remote-modal">
+        <div class="modal-content" style="width:320px;text-align:center;">
+            <div class="modal-title">📱 手机遥控</div>
+            <div style="margin:10px 0;color:#a0a0a0;font-size:13px;">同一WiFi下扫码控制</div>
+            <img id="qrcode-img" src="/api/qrcode" style="width:240px;height:240px;background:white;padding:8px;border-radius:8px;" alt="二维码">
+            <div id="qrcode-error-hint" style="display:none;width:240px;height:240px;margin:0 auto;background:#0f3460;border-radius:8px;color:#e94560;font-size:13px;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">二维码加载失败，请关闭后重新打开本弹窗重试</div>
+            <div style="margin-top:10px;color:#6e7a99;font-size:12px;">请使用手机相机或扫一扫功能扫描上方二维码</div>
+            <div class="modal-btns" style="margin-top:15px;">
+                <button class="modal-btn cancel" onclick="sendCommand('toggleQrcode')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+        const POS_IDS = ['top', 'right', 'bottom', 'left'];
+        const END_POS = {'top':'end-top','left':'end-left','right':'end-right','bottom':'end-bottom'};
+
+let gameState = {
+    isRunning: false,
+    startTime: null,
+    timerInterval: null,
+    difen: 20,
+    beilv: 1,
+    danbu: 10,
+    initialDealer: '东',
+    players: {},
+    currentDealer: '东',
+    missingDir: null,
+    roundsCount: 1,
+    gamesCount: 0,
+    history: [],
+    records: [],
+    selectedBtn: null,
+    screen: 'idle'
+};
+
+        function fitScale() {
+            const gameContainer = document.getElementById('game-container');
+            const endContainer = document.getElementById('end-container');
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+
+            if (!endContainer.classList.contains('show')) {
+                const bw = 968;
+                const bh = 548;
+                const scale = Math.min(vw / bw, vh / bh) * 0.98;
+                gameContainer.style.transform = 'scale(' + scale + ')';
+            } else {
+                const bw = 544;
+                const bh = 544;
+                const scale = Math.min(vw / bw, vh / bh) * 0.98;
+                endContainer.style.transform = 'scale(' + scale + ')';
+            }
+        }
+        window.addEventListener('resize', fitScale);
+        fitScale();
+
+        function init() {
+            gameState.screen = 'idle';
+            ['东','南','西','北'].forEach(dir => {
+                gameState.players[dir] = {name:'', current:0, benzhuang:0, buci:0};
+            });
+            updateDisplay();
+            setupDragButtons();
+            setupClickMode();
+            setupOpDragButtons();
+            setupOpClickMode();
+            // 统一初始状态：所有游戏操作按钮禁用
+            document.querySelectorAll('.drag-btn').forEach(b=>b.disabled=true);
+        }
+
+        function changeDealer(val) {
+            if (gameState.isRunning) {
+                alert('游戏进行中不可修改定庄！');
+                document.querySelector('input[name="dealer"][value="' + gameState.initialDealer + '"]').checked = true;
+                return;
+            }
+            gameState.initialDealer = val;
+            gameState.currentDealer = val;
+            updateDisplay();
+        }
+
+        function setTopWind(dir) {
+            const windOrder = ['东', '南', '西', '北'];
+            const posOrder = ['top', 'right', 'bottom', 'left'];
+            const idx = windOrder.indexOf(dir);
+            for (let i = 0; i < 4; i++) {
+                const windIdx = (idx + i) % 4;
+                document.getElementById('player-' + posOrder[i]).dataset.dir = windOrder[windIdx];
+            }
+            updateDisplay();
+        }
+
+        function setDealer(dir) {
+            const hasBenzhuang = ['东','南','西','北'].some(d => gameState.players[d].benzhuang !== 0);
+            if (hasBenzhuang) {
+                alert('请在本庄结束后操作');
+                return;
+            }
+            gameState.currentDealer = dir;
+            updateDisplay();
+        }
+
+        function swapWind(dir1, dir2) {
+            const hasBenzhuang = ['东','南','西','北'].some(d => gameState.players[d].benzhuang !== 0);
+            if (hasBenzhuang) {
+                alert('请在本庄结束后操作');
+                return;
+            }
+            const tmp = {...gameState.players[dir1]};
+            gameState.players[dir1] = {...gameState.players[dir2]};
+            gameState.players[dir2] = tmp;
+            if (gameState.missingDir === dir1) {
+                gameState.missingDir = dir2;
+            } else if (gameState.missingDir === dir2) {
+                gameState.missingDir = dir1;
+            }
+            if (gameState.currentDealer === dir1) {
+                gameState.currentDealer = dir2;
+            } else if (gameState.currentDealer === dir2) {
+                gameState.currentDealer = dir1;
+            }
+            updateDisplay();
+        }
+
+        function setMissing(dir) {
+            if (gameState.missingDir) {
+                alert('已经有一方缺了，请先恢复！');
+                return false;
+            }
+            // 如果要缺的是当前庄家，先自动轮换到下一家
+            if (gameState.currentDealer === dir) {
+                moveDealer();
+            }
+            gameState.missingDir = dir;
+            const btn = document.getElementById('btn-missing2');
+            btn.textContent = '人齐';
+            btn.dataset.type = 'full';
+            updateDisplay();
+            return true;
+        }
+
+        function setFull() {
+            gameState.missingDir = null;
+            const btn = document.getElementById('btn-missing2');
+            btn.textContent = '三缺一';
+            btn.dataset.type = 'missing';
+            updateDisplay();
+        }
+
+function handleOpDrop(sourceBtn, targetDir) {
+    const sourceType = sourceBtn.dataset.type;
+
+    if (sourceType === 'wind') {
+        const sourceWind = sourceBtn.dataset.wind;
+        if (sourceWind === targetDir) return;
+        swapWind(sourceWind, targetDir);
+    } else if (sourceType === 'top') {
+        setTopWind(targetDir);
+    } else if (sourceType === 'dealer') {
+        setDealer(targetDir);
+    } else if (sourceType === 'missing') {
+        setMissing(targetDir);
+    }
+}
+
+function highlightOpTargets(sourceBtn) {
+    if (sourceBtn.dataset.type === 'full') return;
+    POS_IDS.forEach(pos => {
+        document.getElementById('player-' + pos).classList.add('click-target');
+    });
+}
+
+        function toggleGame() {
+            const btn = document.getElementById('btn-start');
+            if (!gameState.isRunning) {
+                const difen = parseInt(document.getElementById('set-difen').value);
+                const beilv = parseInt(document.getElementById('set-beilv').value);
+                const danbu = parseInt(document.getElementById('set-danbu').value);
+                if (isNaN(difen)||difen<0){alert('底分必须为非负整数');return;}
+                if (isNaN(beilv)||beilv<1){alert('倍率必须为正整数');return;}
+                if (isNaN(danbu)||danbu<1){alert('单补必须为正整数');return;}
+
+                gameState.difen = difen;
+                gameState.beilv = beilv;
+                gameState.danbu = danbu;
+
+                gameState.isRunning = true;
+                gameState.screen = 'game';
+                gameState.startTime = Date.now();
+                gameState.roundsCount = 1;
+                gameState.gamesCount = 0;
+                gameState.history = [];
+                gameState.records = [];
+                gameState.currentDealer = gameState.initialDealer;
+                ['东','南','西','北'].forEach(dir=>{
+                    gameState.players[dir].current = gameState.difen;
+                    gameState.players[dir].benzhuang = 0;
+                    gameState.players[dir].buci = 0;
+                });
+
+                btn.textContent = '结束';
+                btn.classList.add('active');
+                document.querySelectorAll('.drag-btn').forEach(b=>b.disabled=false);
+                document.querySelectorAll('.setting-input').forEach(r=>r.disabled=true);
+                document.querySelectorAll('input[name="dealer"]').forEach(r=>r.disabled=true);
+                document.getElementById('controls-active').style.display = 'flex';
+                document.getElementById('controls-inactive').style.display = 'none';
+                gameState.timerInterval = setInterval(updateTimer, 1000);
+                updateDisplay();
+            } else {
+                endGame();
+            }
+	    pushStateToRemote();
+        }
+
+function endGame() {
+    gameState.isRunning = false;
+    gameState.screen = 'end';
+    clearInterval(gameState.timerInterval);
+    document.querySelectorAll('.drag-btn').forEach(b=>b.disabled=true);
+    updateEndDisplay();
+    document.getElementById('game-container').style.display = 'none';
+    document.getElementById('end-container').classList.add('show');
+    document.getElementById('btn-start').textContent = '搞起';
+    document.getElementById('btn-start').classList.remove('active');
+    fitScale();
+    pushStateToRemote();
+}
+
+function returnToGame() {
+    document.getElementById('game-container').style.display = 'grid';
+    document.getElementById('end-container').classList.remove('show');
+    gameState.isRunning = true;
+    gameState.screen = 'game';
+    document.getElementById('btn-start').textContent = '结束';
+    document.getElementById('btn-start').classList.add('active');
+    document.querySelectorAll('.drag-btn').forEach(b=>b.disabled=false);
+    fitScale();
+    pushStateToRemote();
+}
+
+        function restartGame() {
+            gameState.isRunning = false;
+            clearInterval(gameState.timerInterval);
+            gameState.startTime = null;
+            gameState.timerInterval = null;
+            gameState.roundsCount = 1;
+            gameState.gamesCount = 0;
+            gameState.history = [];
+            gameState.records = [];
+            gameState.missingDir = null;
+                 gameState.screen = 'idle';
+            gameState.selectedBtn = null;
+
+            const btn = document.getElementById('btn-start');
+            btn.textContent = '搞起';
+            btn.classList.remove('active');
+            document.querySelectorAll('.drag-btn').forEach(b=>b.disabled=true);
+            document.querySelectorAll('.setting-input').forEach(r=>r.disabled=false);
+            document.querySelectorAll('input[name="dealer"]').forEach(r=>r.disabled=false);
+            document.getElementById('controls-active').style.display = 'flex';
+            document.getElementById('controls-inactive').style.display = 'none';
+            document.getElementById('btn-missing2').textContent = '三缺一';
+            document.getElementById('btn-missing2').dataset.type = 'missing';
+
+            ['东','南','西','北'].forEach(dir=>{
+                gameState.players[dir].current = 0;
+                gameState.players[dir].benzhuang = 0;
+                gameState.players[dir].buci = 0;
+            });
+
+            document.getElementById('game-container').style.display = 'grid';
+            document.getElementById('end-container').classList.remove('show');
+            updateDisplay();
+            updateRecords();
+            fitScale();
+            pushStateToRemote();
+        }
+
+        function updateEndDisplay() {
+            POS_IDS.forEach(pos=>{
+                const dir = document.getElementById('player-'+pos).dataset.dir;
+                const p = gameState.players[dir];
+                const base = gameState.difen > p.current ? gameState.difen + gameState.difen - p.current : gameState.difen;
+                const jiesuan = base + p.buci * gameState.danbu;
+                const endId = END_POS[pos];
+                const el = document.getElementById(endId);
+                if (pos === 'top' || pos === 'bottom') {
+                    el.innerHTML = '<span class="end-stat-dir">' + dir + '</span>' +
+                        '<span class="end-stat-name">' + (p.name||'-') + '</span>' +
+                        '<span class="end-stat-label">最终</span>' +
+                        '<span class="end-stat-current">' + p.current + '</span>' +
+                        '<span class="end-stat-label">结算</span>' +
+                        '<span class="end-stat-jiesuan">' + jiesuan + '</span>';
+                } else {
+                    el.innerHTML = '<div class="end-stat-dir">' + dir + '</div>' +
+                        '<div class="end-stat-name">' + (p.name||'-') + '</div>' +
+                        '<div class="end-stat-label">最终</div>' +
+                        '<div class="end-stat-current">' + p.current + '</div>' +
+                        '<div class="end-stat-label">结算</div>' +
+                        '<div class="end-stat-jiesuan">' + jiesuan + '</div>';
+                }
+            });
+        }
+
+        function updateTimer() {
+            if (!gameState.startTime) return;
+            const elapsed = Math.floor((Date.now()-gameState.startTime)/1000);
+            const h = Math.floor(elapsed/3600);
+            const m = Math.floor((elapsed%3600)/60);
+            document.getElementById('stat-time').textContent = String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+        }
+
+        function updateNameByPos(pos, name) {
+            const dir = document.getElementById('player-' + pos).dataset.dir;
+            gameState.players[dir].name = name;
+        }
+
+        function updateDisplay() {
+            POS_IDS.forEach(pos=>{
+                const dir = document.getElementById('player-'+pos).dataset.dir;
+                const p = gameState.players[dir];
+                const el = document.getElementById('player-'+pos);
+                el.querySelector('.pd-position').textContent = dir;
+                document.getElementById('name-input-'+pos).value = p.name;
+                const dealerEl = document.getElementById('dealer-'+pos);
+                dealerEl.classList.toggle('hidden', gameState.currentDealer !== dir);
+                document.getElementById('score-'+pos).textContent = p.current;
+                const bzArea = document.getElementById('benzhuang-wrap-'+pos);
+                const bzEl = document.getElementById('benzhuang-'+pos);
+                bzEl.textContent = p.benzhuang;
+                bzArea.classList.toggle('show', p.benzhuang !== 0);
+                document.getElementById('buci-'+pos).textContent = p.buci;
+                const base = gameState.difen > p.current ? gameState.difen + gameState.difen - p.current : gameState.difen;
+                document.getElementById('jiesuan-'+pos).textContent = base + p.buci * gameState.danbu;
+                if (gameState.missingDir === dir) { el.classList.add('disabled'); }
+                else { el.classList.remove('disabled'); }
+                if (p.current < 0) { el.classList.add('negative-score'); }
+                else { el.classList.remove('negative-score'); }
+            });
+            document.getElementById('stat-rounds').textContent = gameState.roundsCount;
+            document.getElementById('stat-games').textContent = gameState.gamesCount;
+            pushStateToRemote();
+        }
+
+ function pushStateToRemote() {
+    const state = {
+        action: 'state',
+        players: {},
+        isRunning: gameState.isRunning,
+        screen: gameState.screen,
+        // 让新连接/重新同步的手机能知道二维码弹窗当前的真实开关状态，而不是永远默认从"关闭"开始猜
+        qrcodeOpen: document.getElementById('remote-modal').classList.contains('show'),
+        difen: gameState.isRunning ? gameState.difen : (parseInt(document.getElementById('set-difen').value) || 20),
+        beilv: gameState.isRunning ? gameState.beilv : (parseInt(document.getElementById('set-beilv').value) || 1),
+        danbu: gameState.isRunning ? gameState.danbu : (parseInt(document.getElementById('set-danbu').value) || 10),
+        initialDealer: gameState.initialDealer,
+        currentDealer: gameState.currentDealer,
+        missingDir: gameState.missingDir,
+        gamesCount: gameState.gamesCount,
+        roundsCount: gameState.roundsCount,
+        records: gameState.records
+    };
+    ['东','南','西','北'].forEach(dir => {
+        const p = gameState.players[dir];
+        const base = gameState.difen > p.current ? gameState.difen + gameState.difen - p.current : gameState.difen;
+        state.players[dir] = {
+            name: p.name,
+            current: p.current,
+            benzhuang: p.benzhuang,
+            buci: p.buci,
+            jiesuan: base + p.buci * gameState.danbu,
+            isDealer: dir === gameState.currentDealer,
+            isMissing: dir === gameState.missingDir
+        };
+    });
+    fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(Object.assign({}, state, {
+            token: window.__ROOM_TOKEN__
+        }))
+    }).catch(() => {});
+}
+
+        function setupDragButtons() {
+            const dragBtns = document.querySelectorAll('.tile-btn.drag-btn, .flat-btn.drag-btn');
+            dragBtns.forEach(btn=>{
+                let isDragging = false;
+                let dragStarted = false;
+                let startX, startY;
+                let hint = document.getElementById('drag-hint');
+
+                const onDown = function(e) {
+                    if (btn.disabled) return;
+                    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                    isDragging = true;
+                    dragStarted = false;
+                    startX = clientX;
+                    startY = clientY;
+                };
+
+                const onMove = function(e) {
+                    if (!isDragging) return;
+                    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                    const dx = clientX - startX;
+                    const dy = clientY - startY;
+                    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                        dragStarted = true;
+                        hint.textContent = btn.dataset.type;
+                        hint.classList.add('show');
+                        hint.style.left = clientX+'px';
+                        hint.style.top = (clientY-40)+'px';
+                        btn.style.opacity = '0.5';
+                        POS_IDS.forEach(pos=>{
+                            const el = document.getElementById('player-'+pos);
+                            const r = el.getBoundingClientRect();
+                            if (clientX>=r.left&&clientX<=r.right&&clientY>=r.top&&clientY<=r.bottom)
+                                el.classList.add('drag-target');
+                            else el.classList.remove('drag-target');
+                        });
+                    }
+                    if (e.touches) e.preventDefault();
+                };
+
+                const onUp = function(e) {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    hint.classList.remove('show');
+                    btn.style.opacity = '1';
+                    POS_IDS.forEach(pos=>document.getElementById('player-'+pos).classList.remove('drag-target'));
+                    const clientX = e.clientX || (e.changedTouches && e.changedTouches[0].clientX);
+                    const clientY = e.clientY || (e.changedTouches && e.changedTouches[0].clientY);
+                    if (dragStarted && clientX !== undefined) {
+                        let targetPos = null;
+                        POS_IDS.forEach(pos=>{
+                            const el = document.getElementById('player-'+pos);
+                            const r = el.getBoundingClientRect();
+                            if (clientX>=r.left&&clientX<=r.right&&clientY>=r.top&&clientY<=r.bottom)
+                                targetPos = pos;
+                        });
+                        if (targetPos) {
+                            const targetDir = document.getElementById('player-'+targetPos).dataset.dir;
+                            if (gameState.missingDir===targetDir) { alert('该区域已缺一！'); return; }
+                            if (btn.dataset.type === '+' && gameState.players[targetDir].current >= 0) {
+                                alert('补分只能对当前分小于0的玩家操作！');
+                                return;
+                            }
+                            executeAction(btn.dataset.type, targetDir);
+                        }
+                    }
+                };
+
+                btn.addEventListener('mousedown', onDown);
+                btn.addEventListener('touchstart', onDown, {passive: false});
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('touchmove', onMove, {passive: false});
+                document.addEventListener('mouseup', onUp);
+                document.addEventListener('touchend', onUp);
+            });
+        }
+
+        function setupClickMode() {
+            const dragBtns = document.querySelectorAll('.tile-btn.drag-btn, .flat-btn.drag-btn');
+            dragBtns.forEach(btn=>{
+                btn.addEventListener('click', function(e) {
+                    if (btn.disabled) return;
+                    if (gameState.selectedBtn === btn) {
+                        clearSelection();
+                        return;
+                    }
+                    clearSelection();
+                    gameState.selectedBtn = btn;
+                    btn.classList.add('selected');
+                    POS_IDS.forEach(pos=>{
+                        const el = document.getElementById('player-'+pos);
+                        const dir = el.dataset.dir;
+                        if (gameState.missingDir !== dir) {
+                            el.classList.add('click-target');
+                        }
+                    });
+                });
+            });
+    POS_IDS.forEach(pos=>{
+        const el = document.getElementById('player-'+pos);
+        el.addEventListener('click', function() {
+            if (!gameState.selectedBtn) return;
+            const dir = el.dataset.dir;
+
+            // 如果选中的是操作区按钮，执行对应操作
+            if (gameState.selectedBtn.classList.contains('op-grid-btn')) {
+                if (gameState.selectedBtn.dataset.type === 'full') return;
+                handleOpDrop(gameState.selectedBtn, dir);
+                clearSelection();
+                return;
+            }
+
+            if (gameState.missingDir === dir) return;
+            if (gameState.selectedBtn.dataset.type === '+' && gameState.players[dir].current >= 0) {
+                alert('补分只能对当前分小于0的玩家操作！');
+                return;
+            }
+            executeAction(gameState.selectedBtn.dataset.type, dir);
+            clearSelection();
+        });
+    });
+        }
+
+        function clearSelection() {
+            if (gameState.selectedBtn) {
+                gameState.selectedBtn.classList.remove('selected');
+                gameState.selectedBtn = null;
+            }
+            POS_IDS.forEach(pos=>{
+                document.getElementById('player-'+pos).classList.remove('click-target');
+            });
+            document.querySelectorAll('.op-grid-btn').forEach(btn=>{
+                btn.classList.remove('click-target');
+            });
+        }
+
+        function setupOpDragButtons() {
+            const opBtns = document.querySelectorAll('.op-grid-btn');
+            opBtns.forEach(btn=>{
+                let isDragging = false;
+                let dragStarted = false;
+                let startX, startY;
+                let hint = document.getElementById('drag-hint');
+
+                const onDown = function(e) {
+                    if (btn.disabled) return;
+                    if (btn.dataset.type === 'full') return;
+                    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                    isDragging = true;
+                    dragStarted = false;
+                    startX = clientX;
+                    startY = clientY;
+                };
+
+                const onMove = function(e) {
+                    if (!isDragging) return;
+                    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                    const dx = clientX - startX;
+                    const dy = clientY - startY;
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                    dragStarted = true;
+                    let hintText = btn.dataset.wind || btn.textContent;
+                    hint.textContent = hintText;
+                    hint.classList.add('show');
+                    hint.style.left = clientX+'px';
+                    hint.style.top = (clientY-40)+'px';
+                    btn.style.opacity = '0.5';
+                    POS_IDS.forEach(pos=>{
+                        const el = document.getElementById('player-'+pos);
+                        const r = el.getBoundingClientRect();
+                        if (clientX>=r.left&&clientX<=r.right&&clientY>=r.top&&clientY<=r.bottom)
+                            el.classList.add('drag-target');
+                        else
+                            el.classList.remove('drag-target');
+                    });
+                }
+                    if (e.touches) e.preventDefault();
+                };
+
+                const onUp = function(e) {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    hint.classList.remove('show');
+                    btn.style.opacity = '1';
+                    POS_IDS.forEach(pos=>document.getElementById('player-'+pos).classList.remove('drag-target'));
+                    const clientX = e.clientX || (e.changedTouches && e.changedTouches[0].clientX);
+                    const clientY = e.clientY || (e.changedTouches && e.changedTouches[0].clientY);
+                if (dragStarted && clientX !== undefined) {
+                    let targetPos = null;
+                    POS_IDS.forEach(pos=>{
+                        const el = document.getElementById('player-'+pos);
+                        const r = el.getBoundingClientRect();
+                        if (clientX>=r.left&&clientX<=r.right&&clientY>=r.top&&clientY<=r.bottom)
+                            targetPos = pos;
+                    });
+                    if (targetPos) {
+                        const targetDir = document.getElementById('player-'+targetPos).dataset.dir;
+                        handleOpDrop(btn, targetDir);
+                    }
+                }
+                };
+
+                btn.addEventListener('mousedown', onDown);
+                btn.addEventListener('touchstart', onDown, {passive: false});
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('touchmove', onMove, {passive: false});
+                document.addEventListener('mouseup', onUp);
+                document.addEventListener('touchend', onUp);
+            });
+        }
+
+        function setupOpClickMode() {
+            const opBtns = document.querySelectorAll('.op-grid-btn');
+            opBtns.forEach(btn=>{
+                btn.addEventListener('click', function(e) {
+                    if (btn.disabled) return;
+
+                    // 人齐按钮直接执行
+                    if (btn.dataset.type === 'full') {
+                        setFull();
+                        return;
+                    }
+
+                    // 如果已有其他按钮被选中，先清除
+                    if (gameState.selectedBtn && gameState.selectedBtn !== btn) {
+                        clearSelection();
+                    }
+
+                    // 切换自身选中状态
+                    if (gameState.selectedBtn === btn) {
+                        clearSelection();
+                        return;
+                    }
+
+                    gameState.selectedBtn = btn;
+                    btn.classList.add('selected');
+                    highlightOpTargets(btn);
+                });
+            });
+        }
+
+        function executeAction(type, targetDir) {
+            if (!gameState.isRunning) return;
+            const historyState = {
+                players: JSON.parse(JSON.stringify(gameState.players)),
+                currentDealer: gameState.currentDealer,
+                roundsCount: gameState.roundsCount,
+                gamesCount: gameState.gamesCount,
+                records: [...gameState.records],
+                missingDir: gameState.missingDir
+            };
+            gameState.history.push(historyState);
+            if (gameState.history.length > 10) gameState.history.shift();
+            document.getElementById('btn-undo').disabled = false;
+
+            const activePlayers = ['东','南','西','北'].filter(d=>d!==gameState.missingDir);
+            const playerCount = activePlayers.length;
+
+            if (type === '+') {
+                gameState.players[targetDir].current += gameState.danbu;
+                gameState.players[targetDir].buci += 1;
+                addRecord('+', { [targetDir]: gameState.danbu }, gameState.gamesCount + 1);
+            } else if (type === '-') {
+                const multiplier = gameState.beilv;
+                const delta = multiplier * (playerCount - 1);
+                activePlayers.forEach(dir => {
+                    if (dir === targetDir) {
+                        gameState.players[dir].current -= delta;
+                    } else {
+                        gameState.players[dir].current += multiplier;
+                    }
+                });
+                addRecord('-', activePlayers.reduce((acc, dir) => {
+                    acc[dir] = (dir === targetDir) ? 0 - delta : multiplier;
+                    return acc;
+                }, {}), gameState.gamesCount + 1);
+            } else {
+                let multiplier = gameState.beilv;
+                if (type==='Ci') multiplier = gameState.beilv*2;
+                else if (type==='DiorC') multiplier = gameState.beilv*4;
+                else if (type==='110') multiplier = gameState.beilv*8;
+
+                const isDealer = (targetDir === gameState.currentDealer);
+                const roundScores = {};
+                activePlayers.forEach(dir=>{
+                    if (isDealer) {
+                        roundScores[dir] = (dir===targetDir) ? multiplier*2*(playerCount-1) : 0-multiplier*2;
+                    } else {
+                        if (dir===targetDir) roundScores[dir] = multiplier*playerCount;
+                        else if (dir===gameState.currentDealer) roundScores[dir] = 0-multiplier*2;
+                        else roundScores[dir] = 0-multiplier;
+                    }
+                });
+
+                gameState.gamesCount++;
+                addRecord(type, roundScores);
+
+                if (isDealer) {
+                    activePlayers.forEach(dir=>{ gameState.players[dir].benzhuang += roundScores[dir]; });
+                } else {
+                    activePlayers.forEach(dir=>{
+                        gameState.players[dir].current += roundScores[dir];
+                        gameState.players[dir].current += gameState.players[dir].benzhuang;
+                        gameState.players[dir].benzhuang = 0;
+                    });
+                    moveDealer();
+                }
+            }
+            updateDisplay();
+            updateRecords();
+        }
+
+        function moveDealer() {
+            const order = ['东','南','西','北'];
+            let idx = order.indexOf(gameState.currentDealer);
+            const startDealer = gameState.initialDealer;
+            for (let i=1; i<=4; i++) {
+                const nextIdx = (idx-i+4)%4;
+                const nextDir = order[nextIdx];
+                if (nextDir !== gameState.missingDir) {
+                    const oldDealer = gameState.currentDealer;
+                    gameState.currentDealer = nextDir;
+                    if (oldDealer!==startDealer && nextDir===startDealer) gameState.roundsCount++;
+                    break;
+                }
+            }
+        }
+
+        function addRecord(type, roundScores, num) {
+            const dirs = ['东','北','西','南'];
+            const parts = [];
+            dirs.forEach(dir=>{
+                const p = gameState.players[dir];
+                const isDealer = (dir===gameState.currentDealer);
+                const score = roundScores[dir];
+                parts.push({
+                    dealer: isDealer,
+                    dir: dir,
+                    name: p.name||'',
+                    score: score!==undefined ? (score>0?'+'+score:score) : ''
+                });
+            });
+            gameState.records.unshift({type: type, num: num!==undefined ? num : gameState.gamesCount, parts: parts, dealer: gameState.currentDealer});
+        }
+
+        function updateRecords() {
+            const list = document.getElementById('records-list');
+            list.innerHTML = '';
+            const COLOR_A = '#3FC7EB';
+            const COLOR_B = '#2980b9';
+            let lastIdBg = COLOR_A;
+            gameState.records.forEach((rec, idx)=>{
+                const card = document.createElement('div');
+                card.className = 'record-card';
+
+                // 序号底色：庄家变化时交替，字体始终白色#b8735a#c9a04d
+                let idBg = lastIdBg;
+                if (idx > 0 && rec.dealer !== gameState.records[idx - 1].dealer) {
+                    idBg = (lastIdBg === COLOR_A) ? COLOR_B : COLOR_A;
+                }
+                lastIdBg = idBg;
+
+                const idPart = document.createElement('span');
+                idPart.className = 'record-part part-id';
+                idPart.textContent = '#' + rec.num;
+                idPart.style.backgroundColor = idBg;
+                // + 和 - 操作序号字体色与底色相同，实现隐藏但保持宽度
+                if (rec.type === '+' || rec.type === '-') {
+                    idPart.style.color = idBg;
+                } else {
+                    idPart.style.color = '#ffffff';
+                }
+                card.appendChild(idPart);
+
+                // 操作信息：+和-用对应按键色，其他统一蓝色底白色字
+                const typePart = document.createElement('span');
+                typePart.className = 'record-part part-type';
+                typePart.textContent = rec.type;
+                if (rec.type === '+') {
+                    typePart.style.backgroundColor = '#E6CC80';
+                    typePart.style.color = '#1a1a2e';
+                } else if (rec.type === '-') {
+                    typePart.style.backgroundColor = '#ffffff';
+                    typePart.style.color = '#1a1a2e';
+                }
+                card.appendChild(typePart);
+
+                rec.parts.forEach(pt=>{
+                    const playerPart = document.createElement('span');
+                    playerPart.className = 'record-part part-player';
+                    playerPart.textContent = pt.dir + (pt.name?' '+pt.name:'');
+
+                    if (pt.dealer) {
+                        // 当家庄家：橙色
+                        playerPart.style.backgroundColor = '#f39c12';
+                        playerPart.style.color = '#1a1a2e';
+                    } else {
+                        // 其他玩家：根据分数着色
+                        if (pt.score === '') {
+                            playerPart.style.backgroundColor = '#6c757d';
+                            playerPart.style.color = '#ccc';
+                        } else {
+                            const sVal = parseInt(pt.score);
+                            if (sVal > 0) {
+                                playerPart.style.backgroundColor = '#e94560';
+                                playerPart.style.color = '#ffffff';
+                            } else if (sVal < 0) {
+                                playerPart.style.backgroundColor = '#27ae60';
+                                playerPart.style.color = '#ffffff';
+                            } else {
+                                playerPart.style.backgroundColor = '#6c757d';
+                                playerPart.style.color = '#ccc';
+                            }
+                        }
+                    }
+                    card.appendChild(playerPart);
+
+                    if (pt.score !== '') {
+                        const scorePart = document.createElement('span');
+                        const sVal = parseInt(pt.score);
+                        if (sVal > 0) scorePart.className = 'record-part part-score-pos';
+                        else if (sVal < 0) scorePart.className = 'record-part part-score-neg';
+                        else scorePart.className = 'record-part part-score-zero';
+                        scorePart.textContent = pt.score;
+                        card.appendChild(scorePart);
+                    }
+                });
+                list.appendChild(card);
+            });
+        }
+
+        function undoLast() {
+            if (gameState.history.length===0) { document.getElementById('btn-undo').disabled=true; return; }
+            const prev = gameState.history.pop();
+            gameState.players = prev.players;
+            gameState.currentDealer = prev.currentDealer;
+            gameState.roundsCount = prev.roundsCount;
+            gameState.gamesCount = prev.gamesCount;
+            gameState.records = prev.records;
+            gameState.missingDir = prev.missingDir;
+            const btn = document.getElementById('btn-missing2');;
+            if (gameState.missingDir) {   	 
+            	btn.textContent = '人齐';
+            	btn.dataset.type = 'full';
+            } else {
+          	btn.textContent = '三缺一';
+           	btn.dataset.type = 'missing';
+            }
+            if (gameState.history.length===0) document.getElementById('btn-undo').disabled=true;
+            updateDisplay();
+            updateRecords();
+        }
+
+
+
+        // ========== 遥控功能 ==========
+        function initRemote() {
+            // 二维码弹窗点击背景不关闭，只能点弹窗内的"关闭"按钮（和详细记录弹窗保持一致）
+            if (typeof EventSource === 'undefined') return;
+            // 本页面（电脑主页面）以 host 身份连接；身份完全由 token 决定，
+            // 不再需要 role 参数；room_id 现在是路径的一部分
+            let myConnId = null;
+            const evtSource = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect'
+                + '?token=' + encodeURIComponent(window.__ROOM_TOKEN__));
+            evtSource.onmessage = function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'init') {
+                        myConnId = data.connId;
+                        return;
+                    }
+                    handleRemoteCommand(data);
+                } catch(err) {}
+            };
+            evtSource.onerror = function() {
+                console.log('SSE 断开，3秒后重连...');
+                setTimeout(initRemote, 3000);
+            };
+        }
+
+function handleRemoteCommand(data) {
+    const action = data.action;
+    const target = data.target;
+
+    // 先处理不需要游戏运行中的命令
+    if (action === 'returnToGame') {
+        if (!gameState.isRunning && document.getElementById('end-container').classList.contains('show')) {
+            returnToGame();
+        }
+        return;
+    }
+    if (action === 'restartGame') {
+        restartGame();
+        return;
+    }
+    if (action === 'startGame') {
+        if (!gameState.isRunning) {
+            toggleGame();
+        }
+        return;
+    }
+    if (action === 'updateSettings') {
+        if (gameState.isRunning) return;
+        if (data.difen !== undefined) document.getElementById('set-difen').value = data.difen;
+        if (data.beilv !== undefined) document.getElementById('set-beilv').value = data.beilv;
+        if (data.danbu !== undefined) document.getElementById('set-danbu').value = data.danbu;
+        if (data.dealer) {
+            const rd = document.querySelector('input[name="dealer"][value="' + data.dealer + '"]');
+            if (rd) {
+                rd.checked = true;
+                gameState.initialDealer = data.dealer;
+                gameState.currentDealer = data.dealer;
+            }
+        }
+        updateDisplay();
+        return;
+    }
+    if (action === 'sync' || action === 'new_client') {
+        pushStateToRemote();
+        return;
+    }
+    if (action === 'toggleRecords') {
+        const modal = document.getElementById('records-modal');
+        if (modal.classList.contains('show')) {
+            closeRecordsModal();
+        } else {
+            openRecordsModal();
+        }
+        return;
+    }
+    if (action === 'toggleQrcode') {
+        const modal = document.getElementById('remote-modal');
+        if (modal.classList.contains('show')) {
+            closeRemoteModal();
+        } else {
+            openRemoteModal();
+        }
+        return;
+    }
+    // 其余命令需要游戏进行中
+    if (!gameState.isRunning) return;
+
+    if (action === 'undo') {
+        undoLast();
+        return;
+    }
+    if (action === 'nextDealer') {
+        if (target && target !== gameState.currentDealer) {
+            setDealer(target);
+        } else {
+            moveDealer();
+        }
+        return;
+    }
+    if (action === 'toggleMissing') {
+        if (gameState.missingDir) {
+            setFull();
+        } else if (target) {
+            setMissing(target);
+        }
+        return;
+    }
+    if (action === 'top') {
+        if (target) setTopWind(target);
+        return;
+    }
+    if (action === 'sync' || action === 'new_client') {
+        pushStateToRemote();
+        return;
+    }
+    if (action === 'endGame') {
+        if (gameState.isRunning) {
+            toggleGame();
+        }
+        return;
+    }
+    if (['P','Ci','DiorC','110','+','-'].includes(action)) {
+        if (!target) return;
+        if (gameState.missingDir === target) return;
+        if (action === '+' && gameState.players[target].current >= 0) return;
+        executeAction(action, target);
+    }
+}
+
+        // 通过 fetch 拿到图片字节后再赋值给 <img>，比直接把URL丢给src更可靠——
+        // 能明确捕获非200状态和网络错误，避免直接改src偶发出现空白/不渲染的情况
+        function loadQrcodeInto(imgId, hintId, url) {
+            const img = document.getElementById(imgId);
+            const hint = document.getElementById(hintId);
+            fetch(url).then(function(r) {
+                if (!r.ok) throw new Error('bad status ' + r.status);
+                return r.blob();
+            }).then(function(blob) {
+                const objUrl = URL.createObjectURL(blob);
+                const oldSrc = img.src;
+                img.onload = function() {
+                    if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+                };
+                img.src = objUrl;
+                img.style.display = '';
+                if (hint) hint.style.display = 'none';
+            }).catch(function() {
+                img.style.display = 'none';
+                if (hint) hint.style.display = 'flex';
+            });
+        }
+        function openRemoteModal() {
+            document.getElementById('remote-modal').classList.add('show');
+            // 二维码内容由服务器生成，指向本房间的 enter 入口
+            loadQrcodeInto('qrcode-img', 'qrcode-error-hint',
+                '/_room/' + window.__ROOM_ID__ + '/qrcode?t=' + Date.now());
+        }
+        function closeRemoteModal() {
+            document.getElementById('remote-modal').classList.remove('show');
+        }
+        // ========== /遥控功能 ==========
+
+        // 页面真正关闭/跳转时（不是网络抖动），主动告诉服务器"host要走了"，
+        // 让服务器立刻清理房间，不用等15秒宽限期超时——手机端能更快看到断线提示
+        window.addEventListener('pagehide', function() {
+            if (myConnId) {
+                navigator.sendBeacon('/_room/' + window.__ROOM_ID__ + '/leave?conn=' + myConnId);
+            }
+        });
+
+        // 防止浏览器用 bfcache 直接复原出一个带着过期Cookie的旧页面
+        // （这种复原不会重新请求服务器，二维码等功能会因为Cookie已失效而报错）
+        window.addEventListener('pageshow', function(event) {
+            if (event.persisted) {
+                location.reload();
+            }
+        });
+
+        // (二维码加载成功/失败的提示逻辑已经内置在 loadQrcodeInto 里了，不需要额外的 error/load 监听)
+
+        init();
+        initRemote();
+    </script>
+
+    <div class="modal-overlay" id="god-mode-modal">
+        <div class="modal-content" style="width:460px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-title">whoisyourdaddy</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+                <div class="form-group">
+                    <label>底分</label>
+                    <input type="number" id="god-difen" class="setting-input" value="20" min="0" step="1">
+                </div>
+                <div class="form-group">
+                    <label>倍率</label>
+                    <input type="number" id="god-beilv" class="setting-input" value="1" min="1" step="1">
+                </div>
+                <div class="form-group">
+                    <label>单补</label>
+                    <input type="number" id="god-danbu" class="setting-input" value="10" min="1" step="1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>定庄</label>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
+                    <label style="cursor:pointer;font-size:14px;color:#e0e0e0;">
+                        <input type="radio" name="god-dealer" value="东" style="width:16px;height:16px;vertical-align:middle;margin-right:2px;"> 东
+                    </label>
+                    <label style="cursor:pointer;font-size:14px;color:#e0e0e0;">
+                        <input type="radio" name="god-dealer" value="南" style="width:16px;height:16px;vertical-align:middle;margin-right:2px;"> 南
+                    </label>
+                    <label style="cursor:pointer;font-size:14px;color:#e0e0e0;">
+                        <input type="radio" name="god-dealer" value="西" style="width:16px;height:16px;vertical-align:middle;margin-right:2px;"> 西
+                    </label>
+                    <label style="cursor:pointer;font-size:14px;color:#e0e0e0;">
+                        <input type="radio" name="god-dealer" value="北" checked style="width:16px;height:16px;vertical-align:middle;margin-right:2px;"> 北
+                    </label>
+                </div>
+            </div>
+            <div style="font-size:13px;color:#e94560;font-weight:bold;margin:8px 0 4px;">玩家设置</div>
+            <div id="god-players"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
+                <div class="form-group">
+                    <label>时长</label>
+                    <input type="number" id="god-duration" class="setting-input" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>圈数</label>
+                    <input type="number" id="god-quan" class="setting-input" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>局数</label>
+                    <input type="number" id="god-ju" class="setting-input" value="0" min="0">
+                </div>
+            </div>
+            <div class="modal-btns">
+                <button class="modal-btn confirm" onclick="applyGodMode()">确认</button>
+                <button class="modal-btn cancel" onclick="closeGodMode()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function(){
+        var clickCount = 0, clickTimer = null;
+
+        function getGodTrigger(){
+            var endContainer = document.getElementById('end-container');
+            if(!endContainer) return null;
+            var corners = endContainer.querySelectorAll('.end-corner');
+            return corners.length > 0 ? corners[corners.length - 1] : null;
+        }
+
+        function bindGodTrigger(){
+            var trigger = getGodTrigger();
+            if(!trigger || trigger._godBound) return;
+            trigger._godBound = true;
+            trigger.title = '点击三次开启whoisyourdaddy';
+            trigger.addEventListener('click', function(e){
+                e.stopPropagation();
+                clickCount++;
+                if(clickTimer) clearTimeout(clickTimer);
+                clickTimer = setTimeout(function(){ clickCount = 0; }, 2000);
+                if(clickCount >= 3){ clickCount = 0; openGodMode(); }
+            });
+        }
+
+        var endContainer = document.getElementById('end-container');
+        if(endContainer){
+            var mo = new MutationObserver(function(){
+                if(endContainer.classList.contains('show')) bindGodTrigger();
+            });
+            mo.observe(endContainer, { attributes: true, attributeFilter: ['class'] });
+        }
+
+        window.openGodMode = function(){
+            var allGodInputs = document.querySelectorAll('#god-mode-modal input');
+            allGodInputs.forEach(function(el){ el.disabled = false; });
+
+            var difen = document.getElementById('set-difen');
+            var beilv = document.getElementById('set-beilv');
+            var danbu = document.getElementById('set-danbu');
+            if(difen) document.getElementById('god-difen').value = difen.value;
+            if(beilv) document.getElementById('god-beilv').value = beilv.value;
+            if(danbu) document.getElementById('god-danbu').value = danbu.value;
+
+            var curDealer = document.querySelector('input[name="dealer"]:checked');
+            if(curDealer){
+                var rd = document.querySelector('input[name="god-dealer"][value="'+curDealer.value+'"]');
+                if(rd) rd.checked = true;
+            }
+
+            var container = document.getElementById('god-players');
+            container.innerHTML = '';
+            var dirs = ['东','南','西','北'];
+            dirs.forEach(function(dir){
+                var playerEl = document.querySelector('.player-display[data-dir="'+dir+'"]');
+                var score='0', buci='0', benju='0';
+                if(playerEl){
+                    var sEl = playerEl.querySelector('.current-score');
+                    var bEl = playerEl.querySelector('.pd-stat-val[id^="buci-"]');
+                    var jEl = playerEl.querySelector('.pd-benzhuang-val');
+                    if(sEl) score = sEl.textContent;
+                    if(bEl) buci = bEl.textContent;
+                    if(jEl) benju = jEl.textContent;
+                }
+                var div = document.createElement('div');
+                div.className = 'god-player-block';
+                div.innerHTML = 
+                    '<div class="god-player-title">'+dir+'家</div>'+
+                    '<div class="god-player-grid">'+
+                        '<div><label>当前分数</label><input type="number" class="setting-input god-score" data-dir="'+dir+'" value="'+score+'"></div>'+
+                        '<div><label>补次</label><input type="number" class="setting-input god-buci" data-dir="'+dir+'" value="'+buci+'"></div>'+
+                        '<div><label>本局分数</label><input type="number" class="setting-input god-benju" data-dir="'+dir+'" value="'+benju+'"></div>'+
+                    '</div>';
+                container.appendChild(div);
+            });
+
+            var gd = document.getElementById('game-duration');
+            var gq = document.getElementById('game-quan');
+            var gj = document.getElementById('game-ju');
+            if(gd) document.getElementById('god-duration').value = gd.value;
+            if(gq) document.getElementById('god-quan').value = gq.value;
+            if(gj) document.getElementById('god-ju').value = gj.value;
+
+            document.getElementById('god-mode-modal').classList.add('show');
+        };
+
+        window.closeGodMode = function(){
+            document.getElementById('god-mode-modal').classList.remove('show');
+        };
+
+        window.applyGodMode = function(){
+            var godDealerEl = document.querySelector('input[name="god-dealer"]:checked');
+            var godValues = {
+                difen: document.getElementById('god-difen').value,
+                beilv: document.getElementById('god-beilv').value,
+                danbu: document.getElementById('god-danbu').value,
+                dealer: godDealerEl ? godDealerEl.value : '北',
+                duration: document.getElementById('god-duration').value,
+                quan: document.getElementById('god-quan').value,
+                ju: document.getElementById('god-ju').value,
+                players: {}
+            };
+            var dirs = ['东','南','西','北'];
+            dirs.forEach(function(dir){
+                var sIn = document.querySelector('.god-score[data-dir="'+dir+'"]');
+                var bIn = document.querySelector('.god-buci[data-dir="'+dir+'"]');
+                var jIn = document.querySelector('.god-benju[data-dir="'+dir+'"]');
+                godValues.players[dir] = {
+                    score: sIn ? sIn.value : '0',
+                    buci: bIn ? bIn.value : '0',
+                    benju: jIn ? jIn.value : '0'
+                };
+            });
+
+            closeGodMode();
+
+            var gameContainer = document.getElementById('game-container');
+            var endContainer2 = document.getElementById('end-container');
+            if(gameContainer) gameContainer.style.display = 'grid';
+            if(endContainer2) endContainer2.classList.remove('show');
+
+            var startBtn = document.getElementById('btn-start');
+            if(startBtn && startBtn.classList.contains('active')){
+                if(typeof toggleGame === 'function') toggleGame();
+            }
+
+            document.getElementById('set-difen').value = godValues.difen;
+            document.getElementById('set-beilv').value = godValues.beilv;
+            document.getElementById('set-danbu').value = godValues.danbu;
+
+            var rd = document.querySelector('input[name="dealer"][value="'+godValues.dealer+'"]');
+            if(rd){
+                rd.checked = true;
+                if(typeof changeDealer === 'function') changeDealer(godValues.dealer);
+            }
+
+            var dEl = document.getElementById('game-duration');
+            var qEl = document.getElementById('game-quan');
+            var jEl2 = document.getElementById('game-ju');
+            if(dEl) dEl.value = godValues.duration;
+            if(qEl) qEl.value = godValues.quan;
+            if(jEl2) jEl2.value = godValues.ju;
+
+            if(typeof toggleGame === 'function') toggleGame();
+
+            setTimeout(function(){
+                if(typeof gameState !== 'undefined'){
+                    var godDuration = parseInt(godValues.duration) || 0;
+                    if(godDuration > 0 && gameState.startTime){
+                        gameState.startTime = Date.now() - godDuration * 60 * 1000;
+                    }
+                    var godQuan = parseInt(godValues.quan) || 1;
+                    gameState.roundsCount = godQuan;
+                    var godJu = parseInt(godValues.ju) || 0;
+                    gameState.gamesCount = godJu;
+                }
+                dirs.forEach(function(dir){
+                    var p = godValues.players[dir];
+                    var playerEl = document.querySelector('.player-display[data-dir="'+dir+'"]');
+                    if(!playerEl) return;
+                    var sEl = playerEl.querySelector('.current-score');
+                    var bEl = playerEl.querySelector('.pd-stat-val[id^="buci-"]');
+                    var jEl = playerEl.querySelector('.pd-benzhuang-val');
+                    var cEl = playerEl.querySelector('.pd-stat-val[id^="jiesuan-"]');
+                    if(sEl) sEl.textContent = p.score;
+                    if(bEl) bEl.textContent = p.buci;
+                    if(jEl) jEl.textContent = p.benju;
+                    if(cEl) cEl.textContent = p.score;
+
+                    if(typeof gameState !== 'undefined' && gameState.players && gameState.players[dir]){
+                        gameState.players[dir].current = parseInt(p.score) || 0;
+                        gameState.players[dir].benzhuang = parseInt(p.benju) || 0;
+                        gameState.players[dir].buci = parseInt(p.buci) || 0;
+                    }
+                    if(typeof players !== 'undefined' && players[dir]){
+                        players[dir].score = parseInt(p.score) || 0;
+                        players[dir].buci = parseInt(p.buci) || 0;
+                        players[dir].benju = parseInt(p.benju) || 0;
+                        players[dir].jiesuan = parseInt(p.score) || 0;
+                    }
+                    if(typeof gameData !== 'undefined' && gameData[dir]){
+                        gameData[dir].score = parseInt(p.score) || 0;
+                        gameData[dir].buci = parseInt(p.buci) || 0;
+                        gameData[dir].benju = parseInt(p.benju) || 0;
+                    }
+                });
+
+                if(typeof gameState !== 'undefined'){
+                    if(gameState.history) gameState.history = [];
+                    if(gameState.records) gameState.records = [];
+                }
+                if(typeof historyStack !== 'undefined') historyStack = [];
+                if(typeof recordList !== 'undefined') recordList = [];
+
+                if(typeof updateRecords === 'function') updateRecords();
+                if(typeof updateDisplay === 'function') updateDisplay();
+            }, 120);
+        };
+    })();
+    
+        function openRecordsModal() {
+            const modal = document.getElementById('records-modal');
+            const list = document.getElementById('records-modal-list');
+            const sourceList = document.getElementById('records-list');
+            list.innerHTML = sourceList.innerHTML;
+            if (list.innerHTML === '') {
+                list.innerHTML = '<div style="text-align:center;color:#a0a0a0;padding:40px 0;">暂无记录</div>';
+            }
+            modal.classList.add('show');
+        }
+        function closeRecordsModal() {
+            document.getElementById('records-modal').classList.remove('show');
+        }
+        // 发送一个不带 target 的通用指令给服务器广播，本页面自己也会通过 SSE 收到回声
+        // （详细记录/二维码弹窗这类"开关状态"统一走这条路径，保证不管谁触发的，两端状态由同一条消息决定）
+        function sendCommand(action) {
+            fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: action,
+                    token: window.__ROOM_TOKEN__
+                })
+            }).catch(() => {});
+        }
+        // 详细记录弹窗点击背景不关闭，只能点右上角 ✕ 关闭
+
+</script>
+
+    <div class="modal-overlay" id="records-modal">
+        <div class="modal-content records-modal-content">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div class="modal-title" style="margin-bottom:0;">📝 详细记录</div>
+                <span class="expand-btn" onclick="sendCommand('toggleRecords')" title="关闭" style="font-size:20px;">✕</span>
+            </div>
+            <div class="records-modal-scroll" id="records-modal-list"></div>
+        </div>
+    </div>
+
+</body>
+</html>

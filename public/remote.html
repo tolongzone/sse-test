@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>麻将遥控</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+    height: 100%;
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+}
+.remote-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 6px;
+    gap: 4px;
+}
+
+/* ===== 顶部栏 ===== */
+.top-bar {
+    display: flex;
+    gap: 6px;
+    height: 52px;
+    flex-shrink: 0;
+}
+.top-btn {
+    flex: 1;
+    border: none;
+    border-radius: 8px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    color: #e0e0e0;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    padding: 0 2px;
+}
+.top-btn:active { transform: scale(0.96); filter: brightness(1.2); }
+.top-btn.undo { background: #6c757d; color: white; border-color: #6c757d; }
+.top-btn.end { background: #e94560; color: white; border-color: #e94560; }
+
+/* ===== 矮行（在上、三缺一、调庄） ===== */
+.short-row {
+    position: relative;
+    height: 52px;
+    flex-shrink: 0;
+    display: flex;
+}
+.short-row .row-label {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 18px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.95);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    pointer-events: none;
+    z-index: 2;
+    white-space: nowrap;
+}
+.short-row .cells {
+    display: flex;
+    flex: 1;
+    height: 100%;
+}
+.short-row .cell {
+    flex: 1;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.1s;
+    user-select: none;
+    position: relative;
+    opacity: 0.9;
+}
+.short-row .cell:not(:last-child) {
+    border-right: 1px dashed rgba(255,255,255,0.15);
+}
+.short-row .cell:first-child { border-radius: 8px 0 0 8px; }
+.short-row .cell:last-child  { border-radius: 0 8px 8px 0; }
+.short-row .cell:active { filter: brightness(1.2); opacity: 1; }
+.short-row .cell.dimmed { opacity: 0.3 !important; pointer-events: none; }
+
+.row-top .cell { background: #0f3460; border: 1px solid #1a4a7a; }
+.row-missing .cell { background: #0f3460; border: 1px solid #1a4a7a; }
+.row-dealer .cell { background: #0f3460; border: 1px solid #1a4a7a; }
+
+/* ===== 玩家卡片行 ===== */
+.player-row {
+    height: 120px;
+    flex-shrink: 0;
+    display: flex;
+    gap: 4px;
+}
+.player-card {
+    flex: 1;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 8px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.2s;
+}
+.player-card.missing {
+    opacity: 0.35;
+    background: #2a2a3e;
+}
+.player-card.negative {
+    background: #3a1a1a;
+    border-color: #e94560;
+    animation: redPulseMob 1.5s ease-in-out infinite;
+}
+@keyframes redPulseMob {
+    0%, 100% { border-color: #e94560; box-shadow: 0 0 5px rgba(233, 69, 96, 0.3); }
+    50% { border-color: #ff6b6b; box-shadow: 0 0 15px rgba(233, 69, 96, 0.5); }
+}
+.player-card .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 22px;
+    flex-shrink: 0;
+}
+.player-card .pos {
+    font-size: 16px;
+    font-weight: bold;
+    color: #e94560;
+}
+.player-card .benzhuang {
+    font-size: 13px;
+    font-weight: bold;
+    color: #f39c12;
+    display: none;
+}
+.player-card .benzhuang.show { display: block; }
+.player-card .dealer {
+    font-size: 11px;
+    background: #e94560;
+    color: white;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: bold;
+    display: none;
+}
+.player-card .dealer.show { display: block; }
+.player-card .score-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+}
+.player-card .score {
+    font-size: 36px;
+    font-weight: bold;
+    color: #ffd700;
+    text-shadow: 0 0 8px rgba(255, 215, 0, 0.25);
+}
+.player-card .card-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 22px;
+    flex-shrink: 0;
+    font-size: 15px;
+    font-weight: bold;
+}
+.player-card .buci { color: #4ecca3; }
+.player-card .jiesuan { color: #f39c12; }
+
+/* ===== 功能行（+、110、DiorC、Ci、P、-） ===== */
+.action-row {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+.action-row .row-label {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 22px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.95);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6), 0 0 8px rgba(0,0,0,0.4);
+    pointer-events: none;
+    z-index: 2;
+    white-space: nowrap;
+    letter-spacing: 1px;
+}
+.action-row .cells {
+    display: flex;
+    flex: 1;
+    height: 100%;
+}
+.action-row .cell {
+    flex: 1;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.1s;
+    user-select: none;
+    position: relative;
+    opacity: 0.85;
+}
+.action-row .cell:not(:last-child) {
+    border-right: 1px dashed rgba(255,255,255,0.2);
+}
+.action-row .cell:first-child { border-radius: 8px 0 0 8px; }
+.action-row .cell:last-child  { border-radius: 0 8px 8px 0; }
+.action-row .cell:active { filter: brightness(1.25); opacity: 1; }
+.action-row .cell.dimmed { opacity: 0.3 !important; pointer-events: none; }
+/* 游戏开始前，在上/三缺一/调庄/+/110/DiorC/Ci/P/- 这9行整体变暗不可点，效果跟单个方位被标记三缺一时一样 */
+#main-ui.controls-dimmed .short-row .cell,
+#main-ui.controls-dimmed .action-row .cell {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.row-plus .cell { background: #E6CC80; }
+.row-minus .cell { background: #ffffff; }
+.row-110 .cell { background: #e67e22; }
+.row-diorc .cell { background: #8e44ad; }
+.row-ci .cell { background: #2980b9; }
+.row-p .cell { background: #27ae60; }
+
+/* ===== 结束后的双按钮 ===== */
+.end-bar {
+    display: none;
+    gap: 6px;
+    height: 52px;
+    flex-shrink: 0;
+}
+.end-bar.show { display: flex; }
+.end-btn {
+    flex: 1;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+}
+.end-btn:active { transform: scale(0.96); filter: brightness(1.2); }
+.end-btn.back { background: #6c757d; color: white; }
+.end-btn.restart { background: #f1c40f; color: #1a1a2e; }
+
+/* ===== 状态栏 ===== */
+.status-bar {
+    height: 24px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: #a0a0a0;
+    gap: 8px;
+}
+.status-bar .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #27ae60;
+}
+.status-bar .dot.offline { background: #e94560; }
+.status-bar .dot.reconnecting { background: #f0a500; animation: dot-blink 1s infinite; }
+@keyframes dot-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ===== 房间已关闭 - 全屏遮罩 ===== */
+.room-closed-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.78);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 24px;
+}
+.room-closed-overlay.show { display: flex; }
+.room-closed-card {
+    background: #16213e;
+    border-radius: 14px;
+    border: 2px solid #e94560;
+    padding: 28px 22px;
+    width: 100%;
+    max-width: 300px;
+    text-align: center;
+}
+.room-closed-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    animation: room-closed-pulse 1.8s ease-in-out infinite;
+}
+@keyframes room-closed-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.room-closed-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #e94560;
+    margin-bottom: 10px;
+}
+.room-closed-desc {
+    font-size: 13px;
+    color: #c0c0c0;
+    line-height: 1.7;
+    margin-bottom: 20px;
+}
+.room-closed-hint {
+    font-size: 12px;
+    color: #6e7a99;
+    border-top: 1px solid #0f3460;
+    padding-top: 14px;
+}
+
+/* ===== 记录弹窗 ===== */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+}
+.modal-overlay.show { display: flex; }
+.modal-content {
+    background: #16213e;
+    border-radius: 12px;
+    padding: 16px;
+    width: 100%;
+    max-width: 480px;
+    max-height: 80vh;
+    overflow-y: auto;
+    border: 2px solid #0f3460;
+}
+.modal-title {
+    font-size: 16px;
+    color: #e94560;
+    margin-bottom: 10px;
+    text-align: center;
+    font-weight: bold;
+}
+.record-card {
+    background: #0f3460;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.record-part {
+    padding: 1px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.part-id { background: #3FC7EB; color: white; font-weight: bold; }
+.part-type { background: #8e44ad; color: white; }
+.part-player { background: #f39c12; color: #1a1a2e; font-weight: bold; }
+.part-score-pos { background: #e94560; color: white; font-weight: bold; }
+.part-score-neg { background: #27ae60; color: white; font-weight: bold; }
+.part-score-zero { background: #555; color: #ccc; font-weight: bold; }
+.close-btn {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    border: none;
+    border-radius: 6px;
+    background: #0f3460;
+    color: #e0e0e0;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.close-btn:active { filter: brightness(1.2); }
+.pre-start-bar {
+    display: none;
+    gap: 6px;
+    height: 52px;
+    flex-shrink: 0;
+}
+.pre-start-bar.show { display: flex; }
+.pre-start-btn {
+    flex: 1;
+    border: none;
+    border-radius: 8px;
+    background: #e94560;
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+}
+.pre-start-btn:active { transform: scale(0.96); filter: brightness(1.2); }
+.pre-start-btn.secondary {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    color: #e0e0e0;
+    flex: 0 0 96px;
+}
+
+.pre-settings {
+    display: none;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 10px;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+}
+.pre-settings.show { display: block; }
+.pre-settings-title {
+    text-align: center;
+    font-size: 16px;
+    color: #e0e0e0;
+    padding: 4px 0 8px;
+    font-weight: bold;
+}
+.pre-settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.pre-setting-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    flex: 1;
+    justify-content: center;
+}
+.pre-setting-label { color: #a0a0a0; white-space: nowrap; }
+.pre-setting-input {
+    width: 60px;
+    text-align: center;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    color: #4ecca3;
+    font-size: 15px;
+    font-weight: bold;
+    padding: 4px;
+}
+.pre-setting-input:focus { outline: none; border-color: #e94560; }
+.pre-wind-row {
+    display: flex;
+    gap: 4px;
+}
+.pre-wind-btn {
+    flex: 1;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    background: #1a1a2e;
+    color: #a0a0a0;
+    font-size: 15px;
+    font-weight: bold;
+    padding: 8px 0;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+}
+.pre-wind-btn:active { filter: brightness(1.2); }
+.pre-wind-btn.selected {
+    background: #e94560;
+    color: white;
+    border-color: #e94560;
+    box-shadow: 0 0 8px rgba(233, 69, 96, 0.3);
+}
+</style>
+</head>
+<body>
+<div class="remote-container controls-dimmed" id="main-ui">
+    <div class="pre-start-bar" id="pre-start-bar">
+        <button class="pre-start-btn" onclick="sendGlobal('startGame')">搞起</button>
+        <button class="pre-start-btn secondary" onclick="openQrcodeModal()">二维码</button>
+    </div>
+
+    <div class="pre-settings" id="pre-settings">
+        <div class="pre-settings-title">设置</div>
+        <div class="pre-settings-row">
+            <div class="pre-setting-item">
+                <span class="pre-setting-label">底分</span>
+                <input type="number" class="pre-setting-input" id="pre-difen" value="20" min="0" step="1" onchange="updateSetting('difen', this.value)">
+            </div>
+            <div class="pre-setting-item">
+                <span class="pre-setting-label">倍率</span>
+                <input type="number" class="pre-setting-input" id="pre-beilv" value="1" min="1" step="1" onchange="updateSetting('beilv', this.value)">
+            </div>
+            <div class="pre-setting-item">
+                <span class="pre-setting-label">单补</span>
+                <input type="number" class="pre-setting-input" id="pre-danbu" value="10" min="1" step="1" onchange="updateSetting('danbu', this.value)">
+            </div>
+        </div>
+        <div class="pre-settings-title">定庄</div>
+        <div class="pre-wind-row">
+            <button class="pre-wind-btn" data-wind="东" onclick="selectPreWind('东')">东</button>
+            <button class="pre-wind-btn" data-wind="北" onclick="selectPreWind('北')">北</button>
+            <button class="pre-wind-btn" data-wind="西" onclick="selectPreWind('西')">西</button>
+            <button class="pre-wind-btn" data-wind="南" onclick="selectPreWind('南')">南</button>
+        </div>
+    </div>
+    <div class="top-bar" id="top-bar">
+        <button class="top-btn undo" onclick="sendGlobal('undo')">↩ 撤回</button>
+        <button class="top-btn" onclick="toggleRecords()">详细记录</button>
+        <button class="top-btn" onclick="openQrcodeModal()">二维码</button>
+        <button class="top-btn end" id="btn-end" onclick="onEndClick()">结束</button>
+    </div>
+
+    <div class="end-bar" id="end-bar">
+        <button class="end-btn back" onclick="sendGlobal('returnToGame')">返回</button>
+        <button class="end-btn restart" onclick="sendGlobal('restartGame')">重置</button>
+    </div>
+
+    <div class="short-row row-top">
+        <div class="row-label">在上</div>
+        <div class="cells">
+            <button class="cell" data-dir="东" onclick="send('top','东')"></button>
+            <button class="cell" data-dir="北" onclick="send('top','北')"></button>
+            <button class="cell" data-dir="西" onclick="send('top','西')"></button>
+            <button class="cell" data-dir="南" onclick="send('top','南')"></button>
+        </div>
+    </div>
+
+    <div class="short-row row-missing">
+        <div class="row-label" id="missing-label">三缺一</div>
+        <div class="cells">
+            <button class="cell" data-dir="东" onclick="send('toggleMissing','东')"></button>
+            <button class="cell" data-dir="北" onclick="send('toggleMissing','北')"></button>
+            <button class="cell" data-dir="西" onclick="send('toggleMissing','西')"></button>
+            <button class="cell" data-dir="南" onclick="send('toggleMissing','南')"></button>
+        </div>
+    </div>
+
+    <div class="short-row row-dealer">
+        <div class="row-label">调庄</div>
+        <div class="cells">
+            <button class="cell dimmable" data-dir="东" onclick="send('nextDealer','东')"></button>
+            <button class="cell dimmable" data-dir="北" onclick="send('nextDealer','北')"></button>
+            <button class="cell dimmable" data-dir="西" onclick="send('nextDealer','西')"></button>
+            <button class="cell dimmable" data-dir="南" onclick="send('nextDealer','南')"></button>
+        </div>
+    </div>
+
+    <div class="player-row" id="player-row" style="display:none">
+        <div class="player-card" data-dir="东">
+            <div class="card-top">
+                <span class="pos">东</span>
+                <span class="benzhuang">0</span>
+                <span class="dealer">庄</span>
+            </div>
+            <div class="score-wrap">
+                <span class="score">0</span>
+            </div>
+            <div class="card-bottom">
+                <span class="buci">0</span>
+                <span class="jiesuan">0</span>
+            </div>
+        </div>
+        <div class="player-card" data-dir="北">
+            <div class="card-top">
+                <span class="pos">北</span>
+                <span class="benzhuang">0</span>
+                <span class="dealer">庄</span>
+            </div>
+            <div class="score-wrap">
+                <span class="score">0</span>
+            </div>
+            <div class="card-bottom">
+                <span class="buci">0</span>
+                <span class="jiesuan">0</span>
+            </div>
+        </div>
+        <div class="player-card" data-dir="西">
+            <div class="card-top">
+                <span class="pos">西</span>
+                <span class="benzhuang">0</span>
+                <span class="dealer">庄</span>
+            </div>
+            <div class="score-wrap">
+                <span class="score">0</span>
+            </div>
+            <div class="card-bottom">
+                <span class="buci">0</span>
+                <span class="jiesuan">0</span>
+            </div>
+        </div>
+        <div class="player-card" data-dir="南">
+            <div class="card-top">
+                <span class="pos">南</span>
+                <span class="benzhuang">0</span>
+                <span class="dealer">庄</span>
+            </div>
+            <div class="score-wrap">
+                <span class="score">0</span>
+            </div>
+            <div class="card-bottom">
+                <span class="buci">0</span>
+                <span class="jiesuan">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="action-row row-plus">
+        <div class="row-label">+</div>
+        <div class="cells">
+            <button class="cell dimmable" data-dir="东" onclick="send('+','东')"></button>
+            <button class="cell dimmable" data-dir="北" onclick="send('+','北')"></button>
+            <button class="cell dimmable" data-dir="西" onclick="send('+','西')"></button>
+            <button class="cell dimmable" data-dir="南" onclick="send('+','南')"></button>
+        </div>
+    </div>
+
+    <div class="action-row row-110">
+        <div class="row-label">110</div>
+        <div class="cells">
+            <button class="cell dimmable" data-dir="东" onclick="send('110','东')"></button>
+            <button class="cell dimmable" data-dir="北" onclick="send('110','北')"></button>
+            <button class="cell dimmable" data-dir="西" onclick="send('110','西')"></button>
+            <button class="cell dimmable" data-dir="南" onclick="send('110','南')"></button>
+        </div>
+    </div>
+
+    <div class="action-row row-diorc">
+        <div class="row-label">DiorC</div>
+        <div class="cells">
+            <button class="cell dimmable" data-dir="东" onclick="send('DiorC','东')"></button>
+            <button class="cell dimmable" data-dir="北" onclick="send('DiorC','北')"></button>
+            <button class="cell dimmable" data-dir="西" onclick="send('DiorC','西')"></button>
+            <button class="cell dimmable" data-dir="南" onclick="send('DiorC','南')"></button>
+        </div>
+    </div>
+
+    <div class="action-row row-ci">
+        <div class="row-label">Ci</div>
+        <div class="cells">
+            <button class="cell dimmable" data-dir="东" onclick="send('Ci','东')"></button>
+            <button class="cell dimmable" data-dir="北" onclick="send('Ci','北')"></button>
+            <button class="cell dimmable" data-dir="西" onclick="send('Ci','西')"></button>
+            <button class="cell dimmable" data-dir="南" onclick="send('Ci','南')"></button>
+        </div>
+    </div>
+
+    <div class="action-row row-p">
+        <div class="row-label">P</div>
+        <div class="cells">
+            <button class="cell dimmable" data-dir="东" onclick="send('P','东')"></button>
+            <button class="cell dimmable" data-dir="北" onclick="send('P','北')"></button>
+            <button class="cell dimmable" data-dir="西" onclick="send('P','西')"></button>
+            <button class="cell dimmable" data-dir="南" onclick="send('P','南')"></button>
+        </div>
+    </div>
+
+    <div class="action-row row-minus">
+        <div class="row-label">-</div>
+        <div class="cells">
+            <button class="cell dimmable" data-dir="东" onclick="send('-','东')"></button>
+            <button class="cell dimmable" data-dir="北" onclick="send('-','北')"></button>
+            <button class="cell dimmable" data-dir="西" onclick="send('-','西')"></button>
+            <button class="cell dimmable" data-dir="南" onclick="send('-','南')"></button>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <span class="dot" id="conn-dot"></span>
+        <span id="conn-text">连接中...</span>
+    </div>
+</div>
+
+<!-- 记录弹窗 -->
+<div class="modal-overlay" id="records-modal">
+    <div class="modal-content">
+        <div class="modal-title">📝 详细记录</div>
+        <div id="records-list"></div>
+        <button class="close-btn" onclick="closeRecords()">关闭</button>
+    </div>
+</div>
+
+<!-- 二维码弹窗：显示和电脑端一样的入房二维码，方便第三人就近扫这台手机加入 -->
+<div class="modal-overlay" id="qrcode-modal">
+    <div class="modal-content" style="text-align:center;">
+        <div class="modal-title">📱 邀请加入</div>
+        <div style="margin:6px 0 14px;color:#a0a0a0;font-size:13px;">同一WiFi下扫码控制</div>
+        <img id="phone-qrcode-img" src="" style="width:220px;height:220px;background:white;padding:8px;border-radius:8px;" alt="二维码">
+        <div id="phone-qrcode-error-hint" style="display:none;width:220px;height:220px;margin:0 auto;background:#0f3460;border-radius:8px;color:#e94560;font-size:13px;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">二维码加载失败，请关闭后重新打开重试</div>
+        <button class="close-btn" onclick="closeQrcodeModal()">关闭</button>
+    </div>
+</div>
+
+<!-- 房间已关闭提示（host 断开超过宽限期后显示，遮罩阻止误操作） -->
+<div class="room-closed-overlay" id="room-closed-overlay">
+    <div class="room-closed-card">
+        <div class="room-closed-icon">📵</div>
+        <div class="room-closed-title">主界面已关闭</div>
+        <div class="room-closed-desc">遥控功能已退出，请重新扫码启用</div>
+        <div class="room-closed-hint">本页面已停止响应</div>
+    </div>
+</div>
+
+<script>
+const SERVER = location.origin;
+// room_id/token 现在完全通过 Cookie 认证（首次扫码进入时服务器已经种下），
+// 这里只负责把地址栏里可能残留的 ?room_id=...&token=... 参数清理掉，避免明文暴露在网址/历史记录里
+if (location.search) {
+    history.replaceState(null, '', location.pathname);
+}
+
+// 防止浏览器用 bfcache 直接复原出一个带着过期Cookie的旧页面
+window.addEventListener('pageshow', function(event) {
+    if (event.persisted) {
+        location.reload();
+    }
+});
+
+let isGameEnded = false;
+
+function send(action, target) {
+    const body = { action: action, target: target, token: window.__ROOM_TOKEN__ };
+    fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    }).then(r => {
+        if (r.ok) showStatus('\u2713 ' + action + ' \u2192 ' + target, true);
+        else showStatus('发送失败', false);
+    }).catch(() => showStatus('网络错误', false));
+}
+
+function sendGlobal(action) {
+    const body = { action: action, token: window.__ROOM_TOKEN__ };
+    fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    }).then(r => {
+        if (r.ok) showStatus('\u2713 ' + action, true);
+        else showStatus('发送失败', false);
+    }).catch(() => showStatus('网络错误', false));
+}
+
+function showStatus(text, ok) {
+    const dot = document.getElementById('conn-dot');
+    const txt = document.getElementById('conn-text');
+    txt.textContent = text;
+    dot.className = 'dot' + (ok ? '' : ' offline');
+    setTimeout(() => { txt.textContent = '已连接'; dot.className = 'dot'; }, 1500);
+}
+
+function onEndClick() {
+    sendGlobal('endGame');
+    isGameEnded = true;
+    document.getElementById('top-bar').style.display = 'none';
+    document.getElementById('end-bar').classList.add('show');
+}
+
+// function showMainUI() {
+ //    isGameEnded = false;
+  //   document.getElementById('top-bar').style.display = 'flex';
+  //   document.getElementById('end-bar').classList.remove('show');
+//}
+
+function showPreGameUI(settings) {
+    isGameEnded = false;
+    document.getElementById('main-ui').classList.add('controls-dimmed');
+    document.getElementById('player-row').style.display = 'none';
+    document.getElementById('pre-start-bar').classList.add('show');
+    document.getElementById('pre-settings').classList.add('show');
+    document.getElementById('top-bar').style.display = 'none';
+    document.getElementById('end-bar').classList.remove('show');
+
+    if (settings) {
+        if (settings.difen !== undefined) document.getElementById('pre-difen').value = settings.difen;
+        if (settings.beilv !== undefined) document.getElementById('pre-beilv').value = settings.beilv;
+        if (settings.danbu !== undefined) document.getElementById('pre-danbu').value = settings.danbu;
+        if (settings.initialDealer) {
+            document.querySelectorAll('.pre-wind-btn').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.wind === settings.initialDealer);
+            });
+        }
+    }
+}
+function showMainUI() {
+    isGameEnded = false;
+    document.getElementById('main-ui').classList.remove('controls-dimmed');
+    document.getElementById('player-row').style.display = '';
+    document.getElementById('pre-start-bar').classList.remove('show');
+    document.getElementById('pre-settings').classList.remove('show');
+    document.getElementById('top-bar').style.display = 'flex';
+    document.getElementById('end-bar').classList.remove('show');
+}
+
+function showEndUI() {
+    isGameEnded = true;
+    document.getElementById('main-ui').classList.add('controls-dimmed');
+    document.getElementById('player-row').style.display = '';
+    document.getElementById('pre-start-bar').classList.remove('show');
+    document.getElementById('pre-settings').classList.remove('show');
+    document.getElementById('top-bar').style.display = 'none';
+    document.getElementById('end-bar').classList.add('show');
+}
+
+function toggleRecords() {
+    // 不在本地直接切换状态，统一交给 SSE 广播回声来驱动（电脑端本地开关同理），
+    // 这样不管谁触发的，两端状态永远由同一条消息决定，不会因为收到自己的回声而重复切换
+    sendGlobal('toggleRecords');
+}
+
+function closeRecords() {
+    // 只有在当前确实是"打开"状态时才发送切换请求，避免误触发打开
+    const modal = document.getElementById('records-modal');
+    if (modal.classList.contains('show')) {
+        sendGlobal('toggleRecords');
+    }
+}
+
+// 二维码弹窗和电脑端"手机遥控"弹窗是同一个开关状态，双向同步：
+// 不管哪端触发，都只发广播，真正的开关由收到的广播消息驱动（跟详细记录同一套模式）
+function openQrcodeModal() {
+    sendGlobal('toggleQrcode');
+}
+function closeQrcodeModal() {
+    const modal = document.getElementById('qrcode-modal');
+    if (modal.classList.contains('show')) {
+        sendGlobal('toggleQrcode');
+    }
+}
+// 通过 fetch 拿到图片字节后再赋值给 <img>，比直接把URL丢给src更可靠——
+// 能明确捕获非200状态和网络错误，避免直接改src偶发出现空白/不渲染的情况
+function loadPhoneQrcode() {
+    const img = document.getElementById('phone-qrcode-img');
+    const hint = document.getElementById('phone-qrcode-error-hint');
+    fetch('/_room/' + window.__ROOM_ID__ + '/qrcode?t=' + Date.now()).then(function(r) {
+        if (!r.ok) throw new Error('bad status ' + r.status);
+        return r.blob();
+    }).then(function(blob) {
+        const objUrl = URL.createObjectURL(blob);
+        const oldSrc = img.src;
+        img.onload = function() {
+            if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+        };
+        img.src = objUrl;
+        img.style.display = '';
+        hint.style.display = 'none';
+    }).catch(function() {
+        img.style.display = 'none';
+        hint.style.display = 'flex';
+    });
+}
+// 二维码弹窗点击背景不关闭，只能点弹窗内的"关闭"按钮（和详细记录弹窗保持一致）
+
+function updatePlayerCards(players) {
+    document.querySelectorAll('.player-card').forEach(card => {
+        const dir = card.dataset.dir;
+        const p = players[dir];
+        if (!p) return;
+        card.querySelector('.score').textContent = p.current;
+        card.classList.toggle('negative', p.current < 0);
+        const bz = card.querySelector('.benzhuang');
+        bz.textContent = p.benzhuang;
+        bz.classList.toggle('show', p.benzhuang !== 0);
+        card.querySelector('.buci').textContent = p.buci;
+        card.querySelector('.jiesuan').textContent = p.jiesuan !== undefined ? p.jiesuan : 0;
+        card.querySelector('.dealer').classList.toggle('show', p.isDealer);
+        card.classList.toggle('missing', p.isMissing);
+    });
+}
+
+function updateMissingState(missingDir) {
+    document.getElementById('missing-label').textContent = missingDir ? '人齐' : '三缺一';
+    // 只变暗调庄和6个分数行的对应方位按钮（排除在上和三缺一行）
+    document.querySelectorAll('.cell.dimmable[data-dir]').forEach(cell => {
+        const dir = cell.dataset.dir;
+        cell.classList.toggle('dimmed', missingDir && dir === missingDir);
+    });
+}
+
+function renderRecords(records) {
+    const list = document.getElementById('records-list');
+    if (!records || records.length === 0) {
+        list.innerHTML = '<div style="text-align:center;color:#a0a0a0;padding:30px 0;">暂无记录</div>';
+        return;
+    }
+    const COLOR_A = '#3FC7EB';
+    const COLOR_B = '#2980b9';
+    let lastIdBg = COLOR_A;
+    let html = '';
+    records.forEach((rec, idx) => {
+        let idBg = lastIdBg;
+        if (idx > 0 && rec.dealer !== records[idx - 1].dealer) {
+            idBg = (lastIdBg === COLOR_A) ? COLOR_B : COLOR_A;
+        }
+        lastIdBg = idBg;
+        let typeColor = '#8e44ad', typeTextColor = '#ffffff';
+        if (rec.type === '+') { typeColor = '#E6CC80'; typeTextColor = '#1a1a2e'; }
+        else if (rec.type === '-') { typeColor = '#ffffff'; typeTextColor = '#1a1a2e'; }
+        let partsHtml = '';
+        rec.parts.forEach(pt => {
+            let playerBg, playerColor;
+            if (pt.dealer) { playerBg = '#f39c12'; playerColor = '#1a1a2e'; }
+            else if (pt.score === '') { playerBg = '#6c757d'; playerColor = '#ccc'; }
+            else {
+                const sVal = parseInt(pt.score);
+                if (sVal > 0) { playerBg = '#e94560'; playerColor = '#ffffff'; }
+                else if (sVal < 0) { playerBg = '#27ae60'; playerColor = '#ffffff'; }
+                else { playerBg = '#6c757d'; playerColor = '#ccc'; }
+            }
+            partsHtml += '<span class="record-part part-player" style="background:' + playerBg + ';color:' + playerColor + '">' + pt.dir + (pt.name ? ' ' + pt.name : '') + '</span>';
+            if (pt.score !== '') {
+                const sVal = parseInt(pt.score);
+                let scoreClass = sVal > 0 ? 'part-score-pos' : (sVal < 0 ? 'part-score-neg' : 'part-score-zero');
+                partsHtml += '<span class="record-part ' + scoreClass + '">' + pt.score + '</span>';
+            }
+        });
+        let idTextColor = (rec.type === '+' || rec.type === '-') ? idBg : '#ffffff';
+        html += '<div class="record-card">' +
+            '<span class="record-part part-id" style="background-color:' + idBg + ';color:' + idTextColor + '">#' + rec.num + '</span>' +
+            '<span class="record-part part-type" style="background:' + typeColor + ';color:' + typeTextColor + '">' + rec.type + '</span>' +
+            partsHtml + '</div>';
+    });
+    list.innerHTML = html;
+}
+
+// SSE 接收电脑端状态
+let __syncSent = false;
+function __trySync() {
+    if (!__syncSent) {
+        __syncSent = true;
+        sendGlobal('sync');
+    }
+}
+
+let myConnId = null;
+const evtSource = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect'
+    + '?token=' + encodeURIComponent(window.__ROOM_TOKEN__));
+evtSource.onopen = function() {
+    // 重新连上说明房间仍然有效，隐藏"已关闭"提示（正常情况下不会走到这，属于防御性处理）
+    document.getElementById('room-closed-overlay').classList.remove('show');
+    __trySync();
+};
+evtSource.onmessage = function(e) {
+    try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'init') {
+            myConnId = data.connId;
+            return;
+        }
+        if (data.type === 'status') {
+            // 房间宽限期/心跳相关的状态提示，先不用特殊处理，等 host 断线真正发生
+            // 时依赖下面 evtSource.onerror 的逻辑，这里先忽略
+            return;
+        }
+        if (data.action === 'room_closed') {
+            // 服务器主动通知房间已关闭（host主动离开或宽限期超时），
+            // 不用等连接真的断开、重连失败才发现，立刻弹出遮罩
+            const dot = document.getElementById('conn-dot');
+            const txt = document.getElementById('conn-text');
+            dot.className = 'dot offline';
+            txt.textContent = '连接断开';
+            document.getElementById('room-closed-overlay').classList.add('show');
+            return;
+        }
+        if (data.action === 'toggleRecords') {
+            // 电脑端本地开关详细记录时也会广播这个动作，这里保持两端同步
+            document.getElementById('records-modal').classList.toggle('show');
+            return;
+        }
+        if (data.action === 'toggleQrcode') {
+            // 和电脑端"手机遥控"弹窗同一个开关状态，双向同步
+            const modal = document.getElementById('qrcode-modal');
+            const willShow = !modal.classList.contains('show');
+            modal.classList.toggle('show');
+            if (willShow) {
+                loadPhoneQrcode();
+            }
+            return;
+        }
+        if (data.action === 'state') {
+            __syncSent = true; // 收到状态后标记已同步
+            document.getElementById('room-closed-overlay').classList.remove('show');
+            updatePlayerCards(data.players);
+            updateMissingState(data.missingDir);
+            if (data.records) renderRecords(data.records);
+            // 把二维码弹窗状态"设成"和电脑端一致（不是切换），修正任何不同步的情况——
+            // 比如刚连上的手机默认是关闭的，但此时电脑端可能正开着（就是靠这个弹窗扫进来的）
+            if (typeof data.qrcodeOpen === 'boolean') {
+                const qrModal = document.getElementById('qrcode-modal');
+                const isOpen = qrModal.classList.contains('show');
+                if (data.qrcodeOpen && !isOpen) {
+                    qrModal.classList.add('show');
+                    loadPhoneQrcode();
+                } else if (!data.qrcodeOpen && isOpen) {
+                    qrModal.classList.remove('show');
+                }
+            }
+            const dot = document.getElementById('conn-dot');
+            const txt = document.getElementById('conn-text');
+            dot.className = 'dot';
+            txt.textContent = '已连接 · 局' + (data.gamesCount || 0) + ' · 圈' + (data.roundsCount || 0);
+            
+            // 无条件根据电脑端屏幕状态同步三态
+            if (data.screen === 'idle' || data.screen === 'pregame') {
+                showPreGameUI(data);
+            } else if (data.screen === 'game') {
+                showMainUI();
+            } else if (data.screen === 'end') {
+                showEndUI();
+            }
+        }
+    } catch(err) {}
+};
+evtSource.onerror = function() {
+    const dot = document.getElementById('conn-dot');
+    const txt = document.getElementById('conn-text');
+    if (evtSource.readyState === EventSource.CLOSED) {
+        // 服务器明确拒绝了重连（房间已被清理/失效），浏览器不会再自动重试
+        // 这种情况才是真正的"主界面已关闭"，用全屏提示阻断误操作
+        dot.className = 'dot offline';
+        txt.textContent = '连接断开';
+        document.getElementById('room-closed-overlay').classList.add('show');
+    } else {
+        // 仍在自动重连中（网络抖动/短暂切后台），只做轻量提示，不阻断操作
+        dot.className = 'dot reconnecting';
+        txt.textContent = '连接断开，重连中...';
+    }
+};
+
+// 页面加载兜底同步（防止 onopen 未触发或时序问题）
+setTimeout(function() { __trySync(); }, 500);
+
+function selectPreWind(dir) {
+    document.querySelectorAll('.pre-wind-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.wind === dir);
+    });
+    updateSetting('dealer', dir);
+}
+
+function updateSetting(key, value) {
+    const body = { action: 'updateSettings', [key]: value, token: window.__ROOM_TOKEN__ };
+    fetch('/_room/' + window.__ROOM_ID__ + '/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    }).then(r => {
+        if (r.ok) showStatus('✓ 设置已同步', true);
+        else showStatus('同步失败', false);
+    }).catch(() => showStatus('网络错误', false));
+}
+</script>
+</body>
+</html>
