@@ -1722,12 +1722,12 @@ function returnToGame() {
 
 
         // ========== 遥控功能 ==========
+        let myConnId = null;
         function initRemote() {
             // 二维码弹窗点击背景不关闭，只能点弹窗内的"关闭"按钮（和详细记录弹窗保持一致）
             if (typeof EventSource === 'undefined') return;
             // 本页面（电脑主页面）以 host 身份连接；身份完全由 token 决定，
             // 不再需要 role 参数；room_id 现在是路径的一部分
-            let myConnId = null;
             const evtSource = new EventSource('/_room/' + window.__ROOM_ID__ + '/connect'
                 + '?token=' + encodeURIComponent(window.__ROOM_TOKEN__));
             evtSource.onmessage = function(e) {
