@@ -37,12 +37,7 @@ export class Room extends DurableObject {
     if (this.hostToken && this.hostGraceStartedAt === null) {
       this.lastHostToken = this.hostToken;
       this.hostGraceStartedAt = Date.now();
-      // status 字段给前端一个可以 switch 的机器可读代码，不用再去解析 text 文案
-      await this.broadcast({
-        type: "status",
-        status: "host_disconnected",
-        text: `host disconnected, ${GRACE_MS / 1000}s grace period started`,
-      });
+      await this.broadcast({ type: "status", text: `host disconnected, ${GRACE_MS / 1000}s grace period started` });
       await this.ctx.storage.setAlarm(Date.now() + GRACE_MS);
     }
   }
@@ -103,9 +98,7 @@ export class Room extends DurableObject {
       writer.write(encoder.encode(`data: ${JSON.stringify({ type: "init", role, connId })}\n\n`)).catch(() => {});
 
       await this.ensureHeartbeat();
-      if (isReconnect) {
-        await this.broadcast({ type: "status", status: "host_reconnected", text: "host reconnected" });
-      }
+      if (isReconnect) await this.broadcast({ type: "status", text: "host reconnected" });
 
       return new Response(readable, {
         headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
@@ -156,7 +149,7 @@ export class Room extends DurableObject {
         this.hostToken = null;
         this.lastHostToken = null;
         this.hostGraceStartedAt = null;
-        await this.broadcast({ type: "status", status: "grace_expired", text: "grace period expired, host slot released" });
+        await this.broadcast({ type: "status", text: "grace period expired, host slot released" });
       }
     }
 
