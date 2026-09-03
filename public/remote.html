@@ -982,17 +982,8 @@ evtSource.onmessage = function(e) {
             return;
         }
         if (data.type === 'status') {
-            // 电脑端断线/重连的状态提示（DO 里 startHostGraceIfNeeded /
-            // 重连成功时广播），复用现成的 conn-dot/conn-text 指示器展示
-            const dot = document.getElementById('conn-dot');
-            const txt = document.getElementById('conn-text');
-            if (data.text && data.text.indexOf('reconnected') !== -1) {
-                dot.className = 'dot';
-                txt.textContent = '电脑端已重连';
-            } else {
-                dot.className = 'dot reconnecting';
-                txt.textContent = '电脑端已断开，等待重连...';
-            }
+            // 房间宽限期/心跳相关的状态提示，先不用特殊处理，等 host 断线真正发生
+            // 时依赖下面 evtSource.onerror 的逻辑，这里先忽略
             return;
         }
         if (data.action === 'room_closed') {
