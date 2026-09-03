@@ -982,21 +982,16 @@ evtSource.onmessage = function(e) {
             return;
         }
         if (data.type === 'status') {
-            // host 断线/重连/宽限期到期，服务器会立刻广播这类消息（不需要等
-            // 手机自己的连接报错——手机的 SSE 连接本身没断，onerror 不会触发）
+            // 电脑端断线/重连的状态提示（DO 里 startHostGraceIfNeeded /
+            // 重连成功时广播），复用现成的 conn-dot/conn-text 指示器展示
             const dot = document.getElementById('conn-dot');
             const txt = document.getElementById('conn-text');
-            if (data.status === 'host_disconnected') {
-                dot.className = 'dot reconnecting';
-                txt.textContent = '主机已断开，等待重连…';
-            } else if (data.status === 'host_reconnected') {
+            if (data.text && data.text.indexOf('reconnected') !== -1) {
                 dot.className = 'dot';
-                txt.textContent = '主机已重连';
-                __trySync();
-            } else if (data.status === 'grace_expired') {
-                dot.className = 'dot offline';
-                txt.textContent = '连接断开';
-                document.getElementById('room-closed-overlay').classList.add('show');
+                txt.textContent = '电脑端已重连';
+            } else {
+                dot.className = 'dot reconnecting';
+                txt.textContent = '电脑端已断开，等待重连...';
             }
             return;
         }
