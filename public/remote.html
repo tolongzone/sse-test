@@ -982,8 +982,22 @@ evtSource.onmessage = function(e) {
             return;
         }
         if (data.type === 'status') {
-            // 房间宽限期/心跳相关的状态提示，先不用特殊处理，等 host 断线真正发生
-            // 时依赖下面 evtSource.onerror 的逻辑，这里先忽略
+            // host 断线/重连/宽限期到期，服务器会立刻广播这类消息（不需要等
+            // 手机自己的连接报错——手机的 SSE 连接本身没断，onerror 不会触发）
+            const dot = document.getElementById('conn-dot');
+            const txt = document.getElementById('conn-text');
+            if (data.status === 'host_disconnected') {
+                dot.className = 'dot reconnecting';
+                txt.textContent = '主机已断开，等待重连…';
+            } else if (data.status === 'host_reconnected') {
+                dot.className = 'dot';
+                txt.textContent = '主机已重连';
+                __trySync();
+            } else if (data.status === 'grace_expired') {
+                dot.className = 'dot offline';
+                txt.textContent = '连接断开';
+                document.getElementById('room-closed-overlay').classList.add('show');
+            }
             return;
         }
         if (data.action === 'room_closed') {
