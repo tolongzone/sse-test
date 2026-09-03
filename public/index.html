@@ -1742,8 +1742,18 @@ function returnToGame() {
                 } catch(err) {}
             };
             evtSource.onerror = function() {
-                console.log('SSE 断开，3秒后重连...');
-                setTimeout(initRemote, 3000);
+                // 浏览器原生 EventSource 自带自动重连，只要没被服务器彻底
+                // 关掉（readyState 变成 CLOSED），它会自己在后台重试，不需要
+                // 我们插手。之前这里不管三七二十一每次报错都手动 new 一个
+                // 新的 EventSource，导致旧连接（还在浏览器自动重试）从未被
+                // 关掉——网络稍微抖动几次，就会攒下好几条同时开着的长连接，
+                // 占满浏览器对同一个域名的连接数配额，后续 fetch 请求因为
+                // 抢不到连接名额而"挂起"排队。跟 remote.html 保持一致，只有
+                // 真的 CLOSED 了才需要我们自己重新建立
+                if (evtSource.readyState === EventSource.CLOSED) {
+                    console.log('SSE 彻底断开，3秒后重新建立连接...');
+                    setTimeout(initRemote, 3000);
+                }
             };
         }
 
