@@ -982,13 +982,18 @@ evtSource.onmessage = function(e) {
             return;
         }
         if (data.type === 'status') {
-            // 房间宽限期/心跳相关的状态提示，先不用特殊处理，等 host 断线真正发生
-            // 时依赖下面 evtSource.onerror 的逻辑，这里先忽略
+            // 网络抖动导致的 host 断线/重连，不需要打断用户——真正的"房间
+            // 已结束"提示统一走下面 data.action === 'room_closed' 分支
+            // （主动离开 leave / 心跳宽限期到期两种情况都会广播它）
             return;
         }
         if (data.action === 'room_closed') {
             // 服务器主动通知房间已关闭（host主动离开或宽限期超时），
-            // 不用等连接真的断开、重连失败才发现，立刻弹出遮罩
+            // 不用等连接真的断开、重连失败才发现，立刻弹出遮罩。
+            // reason 只打到控制台方便排查：grace_expired 意味着不是
+            // host 主动关页面、而是心跳15秒都没等到人回来，更可能是
+            // 服务器/DO 那边出了问题，值得去查一下
+            if (data.reason) console.log('room_closed, reason:', data.reason);
             const dot = document.getElementById('conn-dot');
             const txt = document.getElementById('conn-text');
             dot.className = 'dot offline';
