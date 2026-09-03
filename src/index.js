@@ -33,6 +33,11 @@ export class Room extends DurableObject {
     if (existing === null) await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
   }
 
+  // 只由心跳检测（alarm）路径调用——代表"页面还开着，只是这一条连接
+  // 断了，可能是网络抖动"，值得等 15 秒看 host 会不会用同一个 token
+  // 自动重连回来。主动关闭页面（pagehide/leave）不走这条路径，见 fetch()
+  // 里 action === "leave" 的处理：那种情况不可能用同一个 token 回来
+  // （因为 "/" 每次都生成全新房间），没必要等，直接判定房间结束。
   async startHostGraceIfNeeded() {
     if (this.hostToken && this.hostGraceStartedAt === null) {
       this.lastHostToken = this.hostToken;
@@ -98,6 +103,9 @@ export class Room extends DurableObject {
       writer.write(encoder.encode(`data: ${JSON.stringify({ type: "init", role, connId })}\n\n`)).catch(() => {});
 
       await this.ensureHeartbeat();
+      // 网络抖动后同一个 token 重新连上——这只是内部状态复位，不需要
+      // 弹窗告诉用户"重连了"，remote 端很快会收到正常的 state 广播，
+      // 界面自然恢复，不需要额外提示
       if (isReconnect) await this.broadcast({ type: "status", text: "host reconnected" });
 
       return new Response(readable, {
@@ -123,7 +131,16 @@ export class Room extends DurableObject {
       this.sessions = this.sessions.filter((s) => s.connId !== connId);
       if (target && target.role === "host" && target.token === this.hostToken) {
         const stillHasHostConn = this.sessions.some((s) => s.role === "host" && s.token === this.hostToken);
-        if (!stillHasHostConn) await this.startHostGraceIfNeeded();
+        if (!stillHasHostConn) {
+          // 页面真正关闭/跳转触发的主动离开（pagehide → sendBeacon），
+          // 不是网络抖动——host 不可能用同一个 token 回来（"/" 每次都是
+          // 全新房间），没必要等 15 秒宽限期，直接判定房间结束，立刻
+          // 广播 room_closed，remote 端复用现成的"主界面已关闭"遮罩
+          this.hostToken = null;
+          this.lastHostToken = null;
+          this.hostGraceStartedAt = null;
+          await this.broadcast({ type: "msg", action: "room_closed", reason: "host_left", text: "host left the page" });
+        }
       }
       return new Response("ok");
     }
@@ -146,10 +163,16 @@ export class Room extends DurableObject {
       if (this.hostGraceStartedAt === null) {
         await this.startHostGraceIfNeeded();
       } else if (Date.now() - this.hostGraceStartedAt >= GRACE_MS) {
+        // 心跳这条路径走到这里，说明不是一次性的网络抖动——host 那台
+        // 设备的连接消失了整整 15 秒都没能用同一个 token 自动连回来，
+        // 这已经不是"正常网络波动"能解释的了，很可能是服务器/DO 那边
+        // 出了问题（或者 host 设备本身出问题却没能触发正常的 pagehide/
+        // leave）。跟主动离开一样，广播 room_closed 让 remote 端立刻
+        // 提示，方便发现问题去排查服务器，而不是无声无息地卡在这里
         this.hostToken = null;
         this.lastHostToken = null;
         this.hostGraceStartedAt = null;
-        await this.broadcast({ type: "status", text: "grace period expired, host slot released" });
+        await this.broadcast({ type: "msg", action: "room_closed", reason: "grace_expired", text: "host connection lost and did not recover within grace period" });
       }
     }
 
