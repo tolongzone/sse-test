@@ -753,16 +753,6 @@ html, body {
     </div>
 </div>
 
-<!-- 二维码弹窗：显示和电脑端一样的入房二维码，方便第三人就近扫这台手机加入 -->
-<div class="modal-overlay" id="qrcode-modal">
-    <div class="modal-content" style="text-align:center;">
-        <div class="modal-title">📱 邀请加入</div>
-        <div style="margin:6px 0 14px;color:#a0a0a0;font-size:13px;">同一WiFi下扫码控制</div>
-        <img id="phone-qrcode-img" src="" style="width:220px;height:220px;background:white;padding:8px;border-radius:8px;" alt="二维码">
-        <div id="phone-qrcode-error-hint" style="display:none;width:220px;height:220px;margin:0 auto;background:#0f3460;border-radius:8px;color:#e94560;font-size:13px;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">二维码加载失败，请关闭后重新打开重试</div>
-        <button class="close-btn" onclick="closeQrcodeModal()">关闭</button>
-    </div>
-</div>
 
 <!-- 房间已关闭提示（host 断开超过宽限期后显示，遮罩阻止误操作） -->
 <div class="room-closed-overlay" id="room-closed-overlay">
@@ -890,41 +880,11 @@ function closeRecords() {
     }
 }
 
-// 二维码弹窗和电脑端"手机遥控"弹窗是同一个开关状态，双向同步：
-// 不管哪端触发，都只发广播，真正的开关由收到的广播消息驱动（跟详细记录同一套模式）
+// 这个按钮是纯遥控开关：只负责告诉 host 切换它自己的二维码显示，
+// 手机这边不再显示/同步任何二维码内容
 function openQrcodeModal() {
     sendGlobal('toggleQrcode');
 }
-function closeQrcodeModal() {
-    const modal = document.getElementById('qrcode-modal');
-    if (modal.classList.contains('show')) {
-        sendGlobal('toggleQrcode');
-    }
-}
-// 通过 fetch 拿到图片字节后再赋值给 <img>，比直接把URL丢给src更可靠——
-// 能明确捕获非200状态和网络错误，避免直接改src偶发出现空白/不渲染的情况
-function loadPhoneQrcode() {
-    const img = document.getElementById('phone-qrcode-img');
-    const hint = document.getElementById('phone-qrcode-error-hint');
-    fetch('/_room/' + window.__ROOM_ID__ + '/qrcode?t=' + Date.now()).then(function(r) {
-        if (!r.ok) throw new Error('bad status ' + r.status);
-        return r.blob();
-    }).then(function(blob) {
-        const objUrl = URL.createObjectURL(blob);
-        const oldSrc = img.src;
-        img.onload = function() {
-            if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
-        };
-        img.src = objUrl;
-        img.style.display = '';
-        hint.style.display = 'none';
-    }).catch(function() {
-        img.style.display = 'none';
-        hint.style.display = 'flex';
-    });
-}
-// 二维码弹窗点击背景不关闭，只能点弹窗内的"关闭"按钮（和详细记录弹窗保持一致）
-
 function updatePlayerCards(players) {
     document.querySelectorAll('.player-card').forEach(card => {
         const dir = card.dataset.dir;
@@ -1042,13 +1002,7 @@ evtSource.onmessage = function(e) {
             return;
         }
         if (data.action === 'toggleQrcode') {
-            // 和电脑端"手机遥控"弹窗同一个开关状态，双向同步
-            const modal = document.getElementById('qrcode-modal');
-            const willShow = !modal.classList.contains('show');
-            modal.classList.toggle('show');
-            if (willShow) {
-                loadPhoneQrcode();
-            }
+            // 手机端不再显示/同步二维码，这条广播只是给电脑端自己看的，这里忽略即可
             return;
         }
         if (data.action === 'state') {
@@ -1057,18 +1011,6 @@ evtSource.onmessage = function(e) {
             updatePlayerCards(data.players);
             updateMissingState(data.missingDir);
             if (data.records) renderRecords(data.records);
-            // 把二维码弹窗状态"设成"和电脑端一致（不是切换），修正任何不同步的情况——
-            // 比如刚连上的手机默认是关闭的，但此时电脑端可能正开着（就是靠这个弹窗扫进来的）
-            if (typeof data.qrcodeOpen === 'boolean') {
-                const qrModal = document.getElementById('qrcode-modal');
-                const isOpen = qrModal.classList.contains('show');
-                if (data.qrcodeOpen && !isOpen) {
-                    qrModal.classList.add('show');
-                    loadPhoneQrcode();
-                } else if (!data.qrcodeOpen && isOpen) {
-                    qrModal.classList.remove('show');
-                }
-            }
             const dot = document.getElementById('conn-dot');
             const txt = document.getElementById('conn-text');
             dot.className = 'dot';

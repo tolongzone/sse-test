@@ -880,7 +880,8 @@
         <div class="modal-content" style="width:320px;text-align:center;">
             <div class="modal-title">📱 手机遥控</div>
             <div style="margin:10px 0;color:#a0a0a0;font-size:13px;">同一WiFi下扫码控制</div>
-            <img id="qrcode-img" src="/api/qrcode" style="width:240px;height:240px;background:white;padding:8px;border-radius:8px;" alt="二维码">
+            <img id="qrcode-img" src="" style="width:240px;height:240px;background:white;padding:8px;border-radius:8px;display:none;" alt="二维码">
+            <div id="qrcode-loading-hint" style="display:none;width:240px;height:240px;margin:0 auto;background:#0f3460;border-radius:8px;color:#a0a0a0;font-size:13px;align-items:center;justify-content:center;">生成中...</div>
             <div id="qrcode-error-hint" style="display:none;width:240px;height:240px;margin:0 auto;background:#0f3460;border-radius:8px;color:#e94560;font-size:13px;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">二维码加载失败，请关闭后重新打开本弹窗重试</div>
             <div style="margin-top:10px;color:#6e7a99;font-size:12px;">请使用手机相机或扫一扫功能扫描上方二维码</div>
             <div class="modal-btns" style="margin-top:15px;">
@@ -1861,9 +1862,13 @@ function handleRemoteCommand(data) {
 
         // 通过 fetch 拿到图片字节后再赋值给 <img>，比直接把URL丢给src更可靠——
         // 能明确捕获非200状态和网络错误，避免直接改src偶发出现空白/不渲染的情况
-        function loadQrcodeInto(imgId, hintId, url) {
+        function loadQrcodeInto(imgId, hintId, url, loadingHintId) {
             const img = document.getElementById(imgId);
             const hint = document.getElementById(hintId);
+            const loadingHint = loadingHintId ? document.getElementById(loadingHintId) : null;
+            img.style.display = 'none';
+            if (hint) hint.style.display = 'none';
+            if (loadingHint) loadingHint.style.display = 'flex';
             fetch(url).then(function(r) {
                 if (!r.ok) throw new Error('bad status ' + r.status);
                 return r.blob();
@@ -1875,8 +1880,10 @@ function handleRemoteCommand(data) {
                 };
                 img.src = objUrl;
                 img.style.display = '';
+                if (loadingHint) loadingHint.style.display = 'none';
                 if (hint) hint.style.display = 'none';
             }).catch(function() {
+                if (loadingHint) loadingHint.style.display = 'none';
                 img.style.display = 'none';
                 if (hint) hint.style.display = 'flex';
             });
@@ -1885,7 +1892,8 @@ function handleRemoteCommand(data) {
             document.getElementById('remote-modal').classList.add('show');
             // 二维码内容由服务器生成，指向本房间的 enter 入口
             loadQrcodeInto('qrcode-img', 'qrcode-error-hint',
-                '/_room/' + window.__ROOM_ID__ + '/qrcode?t=' + Date.now());
+                '/_room/' + window.__ROOM_ID__ + '/qrcode?t=' + Date.now(),
+                'qrcode-loading-hint');
         }
         function closeRemoteModal() {
             document.getElementById('remote-modal').classList.remove('show');
