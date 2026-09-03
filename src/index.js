@@ -149,13 +149,15 @@ export class Room extends DurableObject {
   }
 
   async alarm() {
-    const alive = [];
-    for (const s of this.sessions) {
-      try {
-        await withTimeout(s.writer.write(new TextEncoder().encode(`:hb\n\n`)), 3000);
-        alive.push(s);
-      } catch (e) {}
-    }
+    // 心跳检测跟 broadcast() 一样必须并行——挨个 await 会导致任何一个
+    // 连接卡住/失效都拖累后面所有连接排队等它超时（3秒/个），这里曾经
+    // 漏改成跟 broadcast() 一样的并行写法，是真实的性能坑
+    const results = await Promise.allSettled(
+      this.sessions.map((s) =>
+        withTimeout(s.writer.write(new TextEncoder().encode(`:hb\n\n`)), 3000).then(() => s)
+      )
+    );
+    const alive = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
     this.sessions = alive;
     const hostPresent = alive.some((s) => s.role === "host" && s.token === this.hostToken);
 
