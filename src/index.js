@@ -6,10 +6,11 @@ const HEARTBEAT_MS = 5000;
 const DONATE_QR_TEXT = "https://qr.alipay.com/50z11082l6pppmwuhrwc034";
 
 function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
-  ]);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timeout")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 export class Room extends DurableObject {
@@ -58,9 +59,12 @@ export class Room extends DurableObject {
     const url = new URL(request.url);
     const action = url.pathname.split("/").filter(Boolean).pop();
 
+    // POST 请求的 body 只在这里解析一次并存下来，command 分支直接复用，
+    // 不用再 clone+parse 一遍——次数不多，但确实是能省的一次开销
     let token;
+    let body = null;
     if (request.method === "POST") {
-      const body = await request.clone().json().catch(() => ({}));
+      body = await request.json().catch(() => ({}));
       token = body.token;
     } else {
       token = url.searchParams.get("token");
@@ -117,8 +121,7 @@ export class Room extends DurableObject {
       // 房间里任何合法成员（host 或 client）都能发指令；是否真正生效
       // 由 host 页面自己的业务逻辑把关，不在这里卡权限
       if (!this.roleOf(token)) return new Response("forbidden", { status: 403 });
-      const body = await request.clone().json().catch(() => ({}));
-      const { token: _drop, ...payload } = body;
+      const { token: _drop, ...payload } = body || {};
       // 广播放到后台执行，不让发指令的这一方等所有连接都写完才拿到响应——
       // 否则任何一条网络较慢的连接都会拖慢每一次操作的手感
       this.ctx.waitUntil(this.broadcast({ type: "msg", ...payload }));
