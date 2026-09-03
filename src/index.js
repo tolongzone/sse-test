@@ -188,7 +188,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/qrcode/donate") {
-      // 固定内容（支付宝收款码），跟房间/身份无关，不需要认证
+      // 固定内容，跟房间/身份无关，不需要认证
       const qr = qrcode(0, "M");
       qr.addData(DONATE_QR_TEXT);
       qr.make();
@@ -239,7 +239,7 @@ export default {
       return serveWithInjectedVars(env, request, "/index.html", roomId, token);
     }
 
-    // 其余路径交给静态资源层兜底
+    // 其余路径（如果有）交给静态资源层兜底（比如以后加图标之类）
     return env.ASSETS.fetch(request);
   },
 };
